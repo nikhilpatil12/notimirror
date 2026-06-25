@@ -1,0 +1,11 @@
+NotiMirror allows you to receive and manage notifications from an iOS device directly on your Android phone using Apple's native Bluetooth ANCS protocol. 
+  
+Features:
+* Connects directly via BLE (No internet or account required)
+* No companion app required on the iPhone
+* Answer or decline incoming iPhone calls directly from Android
+* Filter specific apps from mirroring to avoid duplicates
+* Keep the screen awake during connection (optional)
+* Show/hide message bodies for privacy
+
+NotiMirror works by reverse-engineering Apple's ANCS (Apple Notification Center Service) protocol. Once the Android and iPhone are paired over Bluetooth, NotiMirror can subscribe to the iPhone's notification stream and display them natively on Android, even bringing Android Auto support to incoming iMessages.

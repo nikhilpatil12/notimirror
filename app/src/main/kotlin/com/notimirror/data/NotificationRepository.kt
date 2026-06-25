@@ -84,8 +84,15 @@ class NotificationRepository(
         message: String,
         date: String
     ) {
+        // Strip null terminator only for SMS to avoid affecting other apps
+        val cleanAppId = if (appIdentifier.trimEnd('\u0000') == "com.apple.MobileSMS") {
+            "com.apple.MobileSMS"
+        } else {
+            appIdentifier
+        }
+
         // Log SMS notifications specifically for debugging
-        if (appIdentifier == "com.apple.MobileSMS") {
+        if (cleanAppId == "com.apple.MobileSMS") {
             logDebugEvent("📱 SMS: title='$title', subtitle='$subtitle', message='${message.take(100)}'")
         }
 
@@ -93,7 +100,7 @@ class NotificationRepository(
             current.map { n ->
                 if (n.uid == uid) {
                     val updated = n.copy(
-                        appIdentifier = appIdentifier,
+                        appIdentifier = cleanAppId,
                         title = title,
                         subtitle = subtitle,
                         message = message,
@@ -101,7 +108,7 @@ class NotificationRepository(
                     )
                     // Show Android notification if enabled and we have content
                     // For SMS, prioritize message over title
-                    val hasContent = if (appIdentifier == "com.apple.MobileSMS") {
+                    val hasContent = if (cleanAppId == "com.apple.MobileSMS") {
                         message.isNotBlank() || title.isNotBlank() || subtitle.isNotBlank()
                     } else {
                         title.isNotBlank() || message.isNotBlank()

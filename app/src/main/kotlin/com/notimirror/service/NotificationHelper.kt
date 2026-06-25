@@ -12,6 +12,7 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.app.RemoteInput
 import com.notimirror.MainActivity
 import com.notimirror.R
 import com.notimirror.data.IPhoneNotification
@@ -23,13 +24,18 @@ class NotificationHelper(private val context: Context) {
         const val CHANNEL_GROUP_ID = "iphone_apps"
         const val CHANNEL_GROUP_NAME = "iPhone Apps"
         private const val CHANNEL_PREFIX = "iphone_"
-        private const val NOTIFICATION_BASE_ID = 10000
+        const val NOTIFICATION_BASE_ID = 10000
 
         // Call notification specific
         const val CHANNEL_INCOMING_CALL = "iphone_incoming_call"
         const val ACTION_ANSWER_CALL = "com.notimirror.ACTION_ANSWER_CALL"
         const val ACTION_DECLINE_CALL = "com.notimirror.ACTION_DECLINE_CALL"
         const val EXTRA_NOTIFICATION_UID = "notification_uid"
+
+        // Android Auto messaging actions
+        const val ACTION_REPLY = "com.notimirror.ACTION_REPLY"
+        const val ACTION_MARK_AS_READ = "com.notimirror.ACTION_MARK_AS_READ"
+        const val KEY_TEXT_REPLY = "key_text_reply"
     }
 
     private val notificationManager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -217,12 +223,6 @@ class NotificationHelper(private val context: Context) {
 
         // Add Android Auto support for messaging notifications
         if (isMessagingApp) {
-            // Create a Car Extender for Android Auto compatibility
-            val carExtender = NotificationCompat.CarExtender()
-                .setColor(context.getColor(android.R.color.holo_blue_dark))
-
-            builder.extend(carExtender)
-
             // For messaging apps, create a MessagingStyle for better Android Auto display
             // Use the actual sender's name (from title) not the app name
             val senderName = when {
@@ -246,6 +246,12 @@ class NotificationHelper(private val context: Context) {
             }
 
             builder.setStyle(messagingStyle)
+
+            // Add required Android Auto actions - CRITICAL for Android Auto display
+            builder.addAction(createReplyAction(notification.uid))
+            builder.addAction(createMarkAsReadAction(notification.uid))
+
+            // Remove CarExtender as it's deprecated in favor of proper actions
         }
 
         with(NotificationManagerCompat.from(context)) {
@@ -463,6 +469,63 @@ class NotificationHelper(private val context: Context) {
             cancelAll()
         }
     }
+
+    // Android Auto required actions
+    private fun createReplyAction(notificationUid: Int): NotificationCompat.Action {
+        // Create RemoteInput for voice reply from Android Auto
+        val remoteInput = RemoteInput.Builder(KEY_TEXT_REPLY)
+            .setLabel("Reply")
+            .build()
+
+        // Create PendingIntent for reply
+        val replyIntent = Intent(context, MessagingActionReceiver::class.java).apply {
+            action = ACTION_REPLY
+            putExtra(EXTRA_NOTIFICATION_UID, notificationUid)
+        }
+
+        val replyPendingIntent = PendingIntent.getBroadcast(
+            context,
+            notificationUid * 3,  // Unique request code
+            replyIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+        )
+
+        // Create and return the reply action with semantic action for Android Auto
+        return NotificationCompat.Action.Builder(
+            android.R.drawable.ic_menu_send,
+            "Reply",
+            replyPendingIntent
+        )
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+            .setShowsUserInterface(false)  // Critical for Android Auto
+            .addRemoteInput(remoteInput)
+            .build()
+    }
+
+    private fun createMarkAsReadAction(notificationUid: Int): NotificationCompat.Action {
+        // Create PendingIntent for mark as read
+        val markAsReadIntent = Intent(context, MessagingActionReceiver::class.java).apply {
+            action = ACTION_MARK_AS_READ
+            putExtra(EXTRA_NOTIFICATION_UID, notificationUid)
+        }
+
+        val markAsReadPendingIntent = PendingIntent.getBroadcast(
+            context,
+            notificationUid * 4,  // Unique request code
+            markAsReadIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+
+        // Create and return the mark as read action with semantic action for Android Auto
+        return NotificationCompat.Action.Builder(
+            android.R.drawable.ic_menu_view,
+            "Mark as read",
+            markAsReadPendingIntent
+        )
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+            .setShowsUserInterface(false)  // Critical for Android Auto
+            .build()
+    }
 }
 
 // Broadcast receiver to handle call actions
@@ -492,6 +555,42 @@ class CallActionReceiver : BroadcastReceiver() {
                 connectionManager?.performNotificationAction(notificationUid, isPositive = false)
                 repository?.markCallAsDeclined(notificationUid)
                 NotificationManagerCompat.from(context).cancel(10000 + notificationUid)
+            }
+        }
+    }
+}
+
+// Broadcast receiver to handle messaging actions for Android Auto
+class MessagingActionReceiver : BroadcastReceiver() {
+    override fun onReceive(context: Context, intent: Intent) {
+        val notificationUid = intent.getIntExtra(NotificationHelper.EXTRA_NOTIFICATION_UID, -1)
+        if (notificationUid == -1) return
+
+        val app = context.applicationContext as? com.notimirror.NotiMirrorApp
+        val repository = app?.container?.repository
+
+        when (intent.action) {
+            NotificationHelper.ACTION_REPLY -> {
+                // Extract the reply text from RemoteInput (from Android Auto voice input)
+                val remoteInput = RemoteInput.getResultsFromIntent(intent)
+                val replyText = remoteInput?.getCharSequence(NotificationHelper.KEY_TEXT_REPLY)?.toString()
+
+                if (!replyText.isNullOrEmpty()) {
+                    // Log the reply attempt - we can't actually send it to iPhone via ANCS
+                    android.util.Log.d("MessagingActionReceiver", "Reply from Android Auto: $replyText")
+                    repository?.logDebugEvent("🚗 Android Auto reply: $replyText (Note: Cannot send to iPhone via ANCS)")
+
+                    // Cancel the notification after "reply" (simulated)
+                    NotificationManagerCompat.from(context).cancel(NotificationHelper.NOTIFICATION_BASE_ID + notificationUid)
+                }
+            }
+            NotificationHelper.ACTION_MARK_AS_READ -> {
+                // Mark as read - we can't sync this to iPhone, but we can dismiss the notification
+                android.util.Log.d("MessagingActionReceiver", "Marked as read from Android Auto")
+                repository?.logDebugEvent("🚗 Android Auto marked as read uid=$notificationUid")
+
+                // Cancel the notification
+                NotificationManagerCompat.from(context).cancel(NotificationHelper.NOTIFICATION_BASE_ID + notificationUid)
             }
         }
     }

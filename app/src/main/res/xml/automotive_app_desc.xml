@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <automotiveApp>
-    <!-- This app provides notification support for Android Auto -->
+    <!-- This app provides notification and messaging support for Android Auto -->
     <uses name="notification" />
+    <uses name="messaging" />
 </automotiveApp>

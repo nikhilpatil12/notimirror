@@ -61,6 +61,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- Receiver for handling messaging actions (Android Auto) -->
+        <receiver
+            android:name=".service.MessagingActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.notimirror.ACTION_REPLY" />
+                <action android:name="com.notimirror.ACTION_MARK_AS_READ" />
+            </intent-filter>
+        </receiver>
+
         <!-- Boot receiver for auto-start on device boot -->
         <receiver
             android:name=".receiver.BootReceiver"

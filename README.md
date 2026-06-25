@@ -4,8 +4,6 @@ An Android app that mirrors iPhone notifications to an Android phone over Blueto
 
 Current app version: **1.1.0** (`versionCode` 2).
 
-[Buy me a beer](https://www.buymeacoffee.com/gemridge)
-
 ---
 
 ## How It Works
@@ -178,6 +176,14 @@ Run JVM parser/command tests:
 Minimum SDK: **31** (Android 12)  
 Target SDK: **35** (Android 15)
 Version name/code are maintained in `app/build.gradle.kts` and displayed in Settings → About.
+
+---
+
+## Support
+
+NotiMirror is a small personal project built to solve a practical Bluetooth notification problem. If it saves you time or helps with your own setup, a small tip is appreciated and helps keep development moving.
+
+<a href="https://www.buymeacoffee.com/gemridge" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-red.png" alt="Buy Me a Coffee" width="217" height="60"></a>
 
 ---
 

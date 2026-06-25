@@ -4,6 +4,8 @@ An Android app that mirrors iPhone notifications to an Android phone over Blueto
 
 Current app version: **1.1.0** (`versionCode` 2).
 
+[Buy me a beer](https://www.buymeacoffee.com/gemridge)
+
 ---
 
 ## How It Works

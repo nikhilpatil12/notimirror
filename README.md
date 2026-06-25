@@ -1,5 +1,10 @@
 # NotiMirror
 
+[![Debug APK](https://github.com/nikhilpatil12/notimirror/actions/workflows/debug-apk.yml/badge.svg)](https://github.com/nikhilpatil12/notimirror/actions/workflows/debug-apk.yml)
+![Version](https://img.shields.io/badge/version-1.1.0-blue)
+![Android](https://img.shields.io/badge/android-12%2B-brightgreen)
+[![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)](LICENSE)
+
 An Android app that mirrors iPhone notifications to an Android phone over Bluetooth Low Energy using Apple's **ANCS** (Apple Notification Center Service) protocol.
 
 Current app version: **1.1.0** (`versionCode` 2).

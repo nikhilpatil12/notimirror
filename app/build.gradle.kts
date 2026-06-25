@@ -11,8 +11,8 @@ android {
         applicationId = "com.notimirror"
         minSdk = 31
         targetSdk = 35
-        versionCode = 3
-        versionName = "0.10.0"
+        versionCode = 4
+        versionName = "0.11.0"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 

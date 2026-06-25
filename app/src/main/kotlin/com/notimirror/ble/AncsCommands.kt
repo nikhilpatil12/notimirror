@@ -38,6 +38,12 @@ object NotificationAttributeId {
     const val NEGATIVE_ACTION_LABEL: Byte = 7
 }
 
+// Action IDs for PerformNotificationAction (§3.11.3)
+object NotificationActionId {
+    const val POSITIVE: Byte = 0
+    const val NEGATIVE: Byte = 1
+}
+
 /**
  * Builds the GetNotificationAttributes command packet (ANCS spec §3.11.2).
  *
@@ -48,7 +54,7 @@ object NotificationAttributeId {
  *          for variable-length attrs (Title, Subtitle, Message) the byte followed
  *          by a uint16 LE max-length so iOS knows how many chars to return.
  */
-fun buildGetNotificationAttributesCommand(uid: Int, maxLength: UShort = 255u): ByteArray {
+fun buildGetNotificationAttributesCommand(uid: Int, maxLength: UShort = 1000u): ByteArray {
     val uidBytes = intToLe32(uid)
     val maxLenBytes = ushortToLe16(maxLength)
 
@@ -60,6 +66,25 @@ fun buildGetNotificationAttributesCommand(uid: Int, maxLength: UShort = 255u): B
         NotificationAttributeId.SUBTITLE, maxLenBytes[0], maxLenBytes[1],
         NotificationAttributeId.MESSAGE,  maxLenBytes[0], maxLenBytes[1],
         NotificationAttributeId.DATE
+        // Don't request action labels by default - they can cause parsing issues
+    )
+}
+
+/**
+ * Builds the PerformNotificationAction command packet (ANCS spec §3.11.3).
+ *
+ * Layout:
+ *   [0]    CommandID = 0x02
+ *   [1-4]  NotificationUID (uint32 little-endian)
+ *   [5]    ActionID (0x00 = positive, 0x01 = negative)
+ */
+fun buildPerformNotificationActionCommand(uid: Int, actionId: Byte): ByteArray {
+    val uidBytes = intToLe32(uid)
+
+    return byteArrayOf(
+        AncsCommandId.PERFORM_NOTIFICATION_ACTION,
+        uidBytes[0], uidBytes[1], uidBytes[2], uidBytes[3],
+        actionId
     )
 }
 

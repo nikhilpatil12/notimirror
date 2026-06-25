@@ -43,11 +43,36 @@ fun parseNotificationSource(data: ByteArray): AncsNotificationEvent? {
  */
 class DataSourceParser {
     private val buffer = mutableListOf<Byte>()
+    private var lastPacketHash: String? = null
+    private var lastPacketTime: Long = 0
 
     /** Append a BLE packet fragment; returns a parsed result if complete, null if more data needed. */
     @Synchronized
     fun append(data: ByteArray): ParsedAttributes? {
+        // Create a hash of this packet to detect duplicates
+        val packetHash = data.joinToString("") { "%02X".format(it) }
+        val now = System.currentTimeMillis()
+
+        // Skip duplicate packets that arrive within 50ms
+        if (packetHash == lastPacketHash && (now - lastPacketTime) < 50) {
+            android.util.Log.d("DataSourceParser", "Skipping duplicate packet")
+            return null  // Skip duplicate
+        }
+
+        lastPacketHash = packetHash
+        lastPacketTime = now
+
+        // Check if this is the start of a new response
+        if (data.isNotEmpty() && data[0] == AncsCommandId.GET_NOTIFICATION_ATTRIBUTES && buffer.isNotEmpty()) {
+            // This is a new response starting, clear the old buffer
+            android.util.Log.d("DataSourceParser", "New response detected, clearing buffer")
+            buffer.clear()
+        }
+
+        val beforeSize = buffer.size
         buffer.addAll(data.toList())
+        android.util.Log.d("DataSourceParser", "Buffer: $beforeSize -> ${buffer.size} bytes")
+
         return tryParse()
     }
 
@@ -70,6 +95,16 @@ class DataSourceParser {
         val attrs = mutableMapOf<Byte, String>()
         var pos = 5  // start of attribute list
 
+        // Track expected attributes based on our request
+        val expectedAttrs = setOf<Byte>(
+            NotificationAttributeId.APP_IDENTIFIER,
+            NotificationAttributeId.TITLE,
+            NotificationAttributeId.SUBTITLE,
+            NotificationAttributeId.MESSAGE,
+            NotificationAttributeId.DATE
+        )
+        val foundAttrs = mutableSetOf<Byte>()
+
         while (pos < bytes.size) {
             // Need at least attributeID(1) + length(2)
             if (pos + 3 > bytes.size) return null  // incomplete, wait for more
@@ -86,7 +121,13 @@ class DataSourceParser {
             } else ""
 
             attrs[attrId] = value
+            foundAttrs.add(attrId)
             pos += length
+
+            // Check if we've received all expected attributes
+            if (expectedAttrs.all { it in foundAttrs }) {
+                break
+            }
         }
 
         // Successful parse — clear buffer for next response

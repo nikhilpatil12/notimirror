@@ -213,5 +213,11 @@ class BleConnectionManager(private val context: Context) {
         }
     }
 
+    fun performNotificationAction(uid: Int, isPositive: Boolean) {
+        val actionId = if (isPositive) NotificationActionId.POSITIVE else NotificationActionId.NEGATIVE
+        val command = buildPerformNotificationActionCommand(uid, actionId)
+        writeControlPoint(command)
+    }
+
     fun isConnected() = _connectionState.value is ConnectionState.ServiceDiscovered
 }

@@ -10,6 +10,8 @@
 
     <!-- Notifications -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.VIBRATE" />
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <!-- Foreground service -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
@@ -48,6 +50,16 @@
             android:name=".service.AncsForegroundService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!-- Receiver for handling call notification actions -->
+        <receiver
+            android:name=".service.CallActionReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.notimirror.ACTION_ANSWER_CALL" />
+                <action android:name="com.notimirror.ACTION_DECLINE_CALL" />
+            </intent-filter>
+        </receiver>
 
         <!-- Android Auto compatibility -->
         <meta-data

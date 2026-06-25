@@ -29,8 +29,8 @@ class AncsClient(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val dataSourceParser = DataSourceParser()
-    private val recentNotificationUids = mutableSetOf<Int>()
-    private var lastNotificationTime = 0L
+    private val processedUids = mutableSetOf<Int>()
+    private var lastProcessedTime = 0L
 
     init {
         observeConnectionState()
@@ -97,23 +97,6 @@ class AncsClient(
         when (event.eventId) {
             AncsEventId.NotificationAdded,
             AncsEventId.NotificationModified -> {
-                // Skip duplicate notifications that arrive within 500ms
-                val now = System.currentTimeMillis()
-                if (event.notificationUid in recentNotificationUids &&
-                    now - lastNotificationTime < 500) {
-                    Log.d(TAG, "Skipping duplicate NS uid=${event.notificationUid}")
-                    repository.logDebugEvent("Skipped duplicate NS uid=${event.notificationUid}")
-                    return
-                }
-
-                recentNotificationUids.add(event.notificationUid)
-                lastNotificationTime = now
-
-                // Clear old UIDs after 1 second
-                if (recentNotificationUids.size > 10) {
-                    recentNotificationUids.clear()
-                }
-
                 // Store a placeholder immediately so UI can show category/flags
                 // while attribute fetch is in flight
                 repository.addOrUpdate(
@@ -126,13 +109,12 @@ class AncsClient(
                         receivedAt    = Instant.now()
                     )
                 )
-                val cmd = buildGetNotificationAttributesCommand(event.notificationUid, maxLength = 1000u)
+                val cmd = buildGetNotificationAttributesCommand(event.notificationUid)
                 repository.logDebugEvent("→ GetNotifAttrs uid=${event.notificationUid} cmd=${cmd.toHex()}")
                 connectionManager.writeControlPoint(cmd)
             }
             AncsEventId.NotificationRemoved -> {
                 repository.remove(event.notificationUid)
-                recentNotificationUids.remove(event.notificationUid)
             }
         }
     }
@@ -143,53 +125,61 @@ class AncsClient(
      * iOS may split a long attribute response across multiple BLE MTU-sized packets.
      * DataSourceParser buffers bytes until it sees a complete response.
      */
-    private val seenDataPackets = mutableSetOf<String>()
-    private var lastDataPacketTime = 0L
-
+    @Synchronized
     private fun handleDataSource(data: ByteArray) {
-        // Create a hash of the packet for duplicate detection
-        val packetHash = data.toHex()
-        val now = System.currentTimeMillis()
-
-        // Skip duplicate packets within 100ms window
-        if (packetHash in seenDataPackets && now - lastDataPacketTime < 100) {
-            Log.d(TAG, "Skipping duplicate DS packet")
-            return
-        }
-
-        seenDataPackets.add(packetHash)
-        lastDataPacketTime = now
-
-        // Clear old hashes periodically
-        if (seenDataPackets.size > 50) {
-            seenDataPackets.clear()
-        }
-
-        val debugLine = "DS ${data.size}B: ${packetHash}"
+        val debugLine = "DS ${data.size}B: ${data.toHex()}"
         Log.d(TAG, debugLine)
         repository.logDebugEvent(debugLine)
 
         val parsed = dataSourceParser.append(data) ?: return
 
-        // Log raw attributes received with their IDs and lengths
-        val attrDetails = parsed.rawAttrs.entries.joinToString(", ") { (id, value) ->
-            val attrName = when (id) {
-                NotificationAttributeId.APP_IDENTIFIER -> "AppID"
-                NotificationAttributeId.TITLE -> "Title"
-                NotificationAttributeId.SUBTITLE -> "Subtitle"
-                NotificationAttributeId.MESSAGE -> "Message"
-                NotificationAttributeId.DATE -> "Date"
-                else -> "Attr$id"
+        // Check if we've already processed this UID recently
+        if (parsed.uid in processedUids) {
+            val now = System.currentTimeMillis()
+            if (now - lastProcessedTime < 1000) {
+                Log.d(TAG, "Skipping already processed uid=${parsed.uid}")
+                return
             }
-            "$attrName(${value.length}): '${value.take(50)}${if (value.length > 50) "..." else ""}'"
+        }
+
+        processedUids.add(parsed.uid)
+        lastProcessedTime = System.currentTimeMillis()
+
+        // Clean up old UIDs periodically
+        if (processedUids.size > 20) {
+            processedUids.clear()
+        }
+
+        // Log raw attributes received with their IDs and lengths
+        val attrDetails = if (parsed.rawAttrs.isEmpty()) {
+            "NO ATTRIBUTES RECEIVED"
+        } else {
+            parsed.rawAttrs.entries.joinToString(", ") { (id, value) ->
+                val attrName = when (id) {
+                    NotificationAttributeId.APP_IDENTIFIER -> "AppID"
+                    NotificationAttributeId.TITLE -> "Title"
+                    NotificationAttributeId.SUBTITLE -> "Subtitle"
+                    NotificationAttributeId.MESSAGE -> "Message"
+                    NotificationAttributeId.DATE -> "Date"
+                    else -> "Attr$id"
+                }
+                if (value.isEmpty()) {
+                    "$attrName(EMPTY)"
+                } else {
+                    "$attrName(${value.length}): '${value.take(50)}${if (value.length > 50) "..." else ""}'"
+                }
+            }
         }
 
         val resultLine = "DS parsed uid=${parsed.uid} attrs: $attrDetails"
         Log.d(TAG, resultLine)
         repository.logDebugEvent(resultLine)
 
-        // Clear seen packets after successful parse
-        seenDataPackets.clear()
+        // Additional debug if app identifier is missing
+        if (parsed.appIdentifier.isEmpty()) {
+            Log.w(TAG, "WARNING: App identifier is empty for uid=${parsed.uid}")
+            repository.logDebugEvent("⚠️ App identifier missing for uid=${parsed.uid}")
+        }
 
         repository.updateAttributes(
             uid           = parsed.uid,

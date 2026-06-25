@@ -39,7 +39,7 @@ jobs:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
 
       - name: Decode keystore
-        if: github.event_name != 'pull_request' && secrets.KEYSTORE_BASE64 != ''
+        if: github.event_name != 'pull_request'
         run: echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > /tmp/release.keystore
 
       - name: Build release APK

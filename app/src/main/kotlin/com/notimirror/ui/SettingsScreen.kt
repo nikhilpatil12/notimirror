@@ -12,6 +12,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import com.notimirror.viewmodel.MainViewModel
+import com.notimirror.utils.AppNameFormatter
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -19,6 +20,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val showBody by vm.showBody.collectAsState()
     val keepScreenAwake by vm.keepScreenAwake.collectAsState()
     val autoReconnect by vm.autoReconnect.collectAsState()
+    val showAndroidNotifications by vm.showAndroidNotifications.collectAsState()
     val filteredApps by vm.filteredApps.collectAsState()
     val notifications by vm.notifications.collectAsState()
 
@@ -57,6 +59,16 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     subtitle = "Display message text in notification cards",
                     checked = showBody,
                     onToggle = { vm.setShowBody(it) }
+                )
+            }
+
+            item {
+                ToggleRow(
+                    icon = Icons.Default.Notifications,
+                    title = "Show Android notifications",
+                    subtitle = "Mirror iPhone notifications in Android notification shade",
+                    checked = showAndroidNotifications,
+                    onToggle = { vm.setShowAndroidNotifications(it) }
                 )
             }
 
@@ -156,7 +168,7 @@ private fun ToggleRow(
 @Composable
 private fun AppFilterRow(bundleId: String, isFiltered: Boolean, onToggle: () -> Unit) {
     ListItem(
-        headlineContent = { Text(bundleId.substringAfterLast(".")) },
+        headlineContent = { Text(AppNameFormatter.format(bundleId)) },
         supportingContent = { Text(bundleId, style = MaterialTheme.typography.bodySmall) },
         leadingContent = {
             Icon(Icons.Default.Apps, contentDescription = null)

@@ -48,6 +48,9 @@ class MainViewModel(
     val filteredApps: StateFlow<Set<String>> = settings.filteredApps
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptySet())
 
+    val showAndroidNotifications: StateFlow<Boolean> = settings.showAndroidNotifications
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
     private val _scanResults = MutableStateFlow<List<ScanResult>>(emptyList())
     val scanResults: StateFlow<List<ScanResult>> = _scanResults.asStateFlow()
 
@@ -80,6 +83,7 @@ class MainViewModel(
     fun setShowBody(v: Boolean) = viewModelScope.launch { settings.setShowBody(v) }
     fun setKeepScreenAwake(v: Boolean) = viewModelScope.launch { settings.setKeepScreenAwake(v) }
     fun setAutoReconnect(v: Boolean) = viewModelScope.launch { settings.setAutoReconnect(v) }
+    fun setShowAndroidNotifications(v: Boolean) = viewModelScope.launch { settings.setShowAndroidNotifications(v) }
     fun toggleFilteredApp(bundleId: String) = viewModelScope.launch { settings.toggleFilteredApp(bundleId) }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {

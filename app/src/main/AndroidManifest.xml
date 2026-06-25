@@ -21,6 +21,9 @@
 
     <uses-feature android:name="android.hardware.bluetooth_le" android:required="true" />
 
+    <!-- Android Auto support -->
+    <uses-feature android:name="android.hardware.type.automotive" android:required="false" />
+
     <application
         android:name=".NotiMirrorApp"
         android:allowBackup="true"
@@ -45,6 +48,11 @@
             android:name=".service.AncsForegroundService"
             android:exported="false"
             android:foregroundServiceType="connectedDevice" />
+
+        <!-- Android Auto compatibility -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc" />
 
     </application>
 </manifest>

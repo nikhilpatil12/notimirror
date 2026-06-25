@@ -45,11 +45,13 @@ class DataSourceParser {
     private val buffer = mutableListOf<Byte>()
 
     /** Append a BLE packet fragment; returns a parsed result if complete, null if more data needed. */
+    @Synchronized
     fun append(data: ByteArray): ParsedAttributes? {
         buffer.addAll(data.toList())
         return tryParse()
     }
 
+    @Synchronized
     fun reset() { buffer.clear() }
 
     private fun tryParse(): ParsedAttributes? {
@@ -96,7 +98,8 @@ class DataSourceParser {
             title         = attrs[NotificationAttributeId.TITLE]          ?: "",
             subtitle      = attrs[NotificationAttributeId.SUBTITLE]       ?: "",
             message       = attrs[NotificationAttributeId.MESSAGE]        ?: "",
-            date          = attrs[NotificationAttributeId.DATE]           ?: ""
+            date          = attrs[NotificationAttributeId.DATE]           ?: "",
+            rawAttrs = attrs  // Add raw attrs for debugging
         )
     }
 }
@@ -107,5 +110,6 @@ data class ParsedAttributes(
     val title: String,
     val subtitle: String,
     val message: String,
-    val date: String
+    val date: String,
+    val rawAttrs: Map<Byte, String> = emptyMap()  // For debugging
 )

@@ -16,6 +16,7 @@ import com.notimirror.ble.ConnectionState
 import com.notimirror.data.AncsCategoryId
 import com.notimirror.data.IPhoneNotification
 import com.notimirror.viewmodel.MainViewModel
+import com.notimirror.utils.AppNameFormatter
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
@@ -157,9 +158,7 @@ private fun NotificationCard(notif: IPhoneNotification, showBody: Boolean) {
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = notif.appIdentifier.substringAfterLast(".").ifBlank {
-                            notif.categoryId.name
-                        },
+                        text = AppNameFormatter.format(notif.appIdentifier),
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )

@@ -21,6 +21,7 @@ class AppSettings(private val context: Context) {
         val FILTERED_APPS = stringPreferencesKey("filtered_apps")
         val LAST_DEVICE_ADDRESS = stringPreferencesKey("last_device")
         val ONBOARDING_DONE = booleanPreferencesKey("onboarding_done")
+        val SHOW_ANDROID_NOTIFICATIONS = booleanPreferencesKey("show_android_notifications")
     }
 
     val showBody: Flow<Boolean> = context.dataStore.data.map { it[Keys.SHOW_BODY] ?: true }
@@ -31,12 +32,14 @@ class AppSettings(private val context: Context) {
     }
     val lastDeviceAddress: Flow<String?> = context.dataStore.data.map { it[Keys.LAST_DEVICE_ADDRESS] }
     val onboardingDone: Flow<Boolean> = context.dataStore.data.map { it[Keys.ONBOARDING_DONE] ?: false }
+    val showAndroidNotifications: Flow<Boolean> = context.dataStore.data.map { it[Keys.SHOW_ANDROID_NOTIFICATIONS] ?: true }
 
     suspend fun setShowBody(v: Boolean) = context.dataStore.edit { it[Keys.SHOW_BODY] = v }
     suspend fun setKeepScreenAwake(v: Boolean) = context.dataStore.edit { it[Keys.KEEP_SCREEN_AWAKE] = v }
     suspend fun setAutoReconnect(v: Boolean) = context.dataStore.edit { it[Keys.AUTO_RECONNECT] = v }
     suspend fun setLastDeviceAddress(addr: String) = context.dataStore.edit { it[Keys.LAST_DEVICE_ADDRESS] = addr }
     suspend fun setOnboardingDone(v: Boolean) = context.dataStore.edit { it[Keys.ONBOARDING_DONE] = v }
+    suspend fun setShowAndroidNotifications(v: Boolean) = context.dataStore.edit { it[Keys.SHOW_ANDROID_NOTIFICATIONS] = v }
     suspend fun toggleFilteredApp(bundleId: String) = context.dataStore.edit { prefs ->
         val current = prefs[Keys.FILTERED_APPS]?.split(",")?.filter(String::isNotBlank)?.toMutableSet() ?: mutableSetOf()
         if (current.contains(bundleId)) current.remove(bundleId) else current.add(bundleId)

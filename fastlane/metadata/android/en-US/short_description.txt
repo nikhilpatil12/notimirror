@@ -1,1 +1,1 @@
-Mirror iPhone notifications to Android via Bluetooth
+Mirror iPhone notifications to Android via BLE

@@ -64,7 +64,7 @@ class DataSourceParser {
             return null
         }
 
-        val uid = le32ToInt(bytes, 4)
+        val uid = le32ToInt(bytes, 1)
         val attrs = mutableMapOf<Byte, String>()
         var pos = 5  // start of attribute list
 

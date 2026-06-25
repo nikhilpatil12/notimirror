@@ -140,3 +140,9 @@ Install to a connected device:
 
 Minimum SDK: **31** (Android 12)  
 Target SDK: **35** (Android 15)
+
+---
+
+## License
+
+This project is licensed under the [GNU General Public License v3.0](LICENSE).

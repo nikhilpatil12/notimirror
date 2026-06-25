@@ -51,6 +51,9 @@ class MainViewModel(
     val showAndroidNotifications: StateFlow<Boolean> = settings.showAndroidNotifications
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
+    val lastDeviceAddress: StateFlow<String?> = settings.lastDeviceAddress
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
     private val _scanResults = MutableStateFlow<List<ScanResult>>(emptyList())
     val scanResults: StateFlow<List<ScanResult>> = _scanResults.asStateFlow()
 
@@ -85,6 +88,7 @@ class MainViewModel(
     fun setAutoReconnect(v: Boolean) = viewModelScope.launch { settings.setAutoReconnect(v) }
     fun setShowAndroidNotifications(v: Boolean) = viewModelScope.launch { settings.setShowAndroidNotifications(v) }
     fun toggleFilteredApp(bundleId: String) = viewModelScope.launch { settings.toggleFilteredApp(bundleId) }
+    fun setLastDeviceAddress(address: String) = viewModelScope.launch { settings.setLastDeviceAddress(address) }
 
     class Factory(private val container: AppContainer) : ViewModelProvider.Factory {
         @Suppress("UNCHECKED_CAST")

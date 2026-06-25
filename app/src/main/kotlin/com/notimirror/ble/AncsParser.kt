@@ -53,8 +53,8 @@ class DataSourceParser {
         val packetHash = data.joinToString("") { "%02X".format(it) }
         val now = System.currentTimeMillis()
 
-        // Skip duplicate packets that arrive within 50ms
-        if (packetHash == lastPacketHash && (now - lastPacketTime) < 50) {
+        // Skip duplicate packets that arrive within 20ms (reduced from 50ms for faster multi-packet responses)
+        if (packetHash == lastPacketHash && (now - lastPacketTime) < 20) {
             android.util.Log.d("DataSourceParser", "Skipping duplicate packet")
             return null  // Skip duplicate
         }
@@ -62,16 +62,19 @@ class DataSourceParser {
         lastPacketHash = packetHash
         lastPacketTime = now
 
-        // Check if this is the start of a new response
-        if (data.isNotEmpty() && data[0] == AncsCommandId.GET_NOTIFICATION_ATTRIBUTES && buffer.isNotEmpty()) {
-            // This is a new response starting, clear the old buffer
-            android.util.Log.d("DataSourceParser", "New response detected, clearing buffer")
-            buffer.clear()
+        // Check if this is the start of a new response (only when buffer is empty or this is clearly a new command)
+        if (data.isNotEmpty() && data[0] == AncsCommandId.GET_NOTIFICATION_ATTRIBUTES) {
+            // Only clear if we have a reasonable buffer size already (likely a complete or partial response)
+            // Don't clear if buffer is small as it might be the beginning of a multi-packet response
+            if (buffer.size > 100) {
+                android.util.Log.d("DataSourceParser", "New response detected (buffer was ${buffer.size}), clearing buffer")
+                buffer.clear()
+            }
         }
 
         val beforeSize = buffer.size
         buffer.addAll(data.toList())
-        android.util.Log.d("DataSourceParser", "Buffer: $beforeSize -> ${buffer.size} bytes")
+        android.util.Log.d("DataSourceParser", "Buffer: $beforeSize -> ${buffer.size} bytes, packet size: ${data.size}")
 
         return tryParse()
     }
@@ -107,14 +110,29 @@ class DataSourceParser {
 
         while (pos < bytes.size) {
             // Need at least attributeID(1) + length(2)
-            if (pos + 3 > bytes.size) return null  // incomplete, wait for more
+            if (pos + 3 > bytes.size) {
+                android.util.Log.d("DataSourceParser", "Incomplete attribute header at pos=$pos, buffer size=${bytes.size}")
+                return null  // incomplete, wait for more
+            }
 
             val attrId = bytes[pos]
             val length = le16ToInt(bytes, pos + 1)
             pos += 3
 
+            android.util.Log.d("DataSourceParser", "Parsing attr $attrId, length=$length at pos=${pos-3}")
+
+            // Sanity check for length
+            if (length > 5000) {
+                android.util.Log.e("DataSourceParser", "Invalid attribute length: $length for attr $attrId, clearing buffer")
+                buffer.clear()
+                return null
+            }
+
             // Need `length` more bytes for the string value
-            if (pos + length > bytes.size) return null  // incomplete
+            if (pos + length > bytes.size) {
+                android.util.Log.d("DataSourceParser", "Incomplete attribute value at pos=$pos, need $length bytes, have ${bytes.size - pos}")
+                return null  // incomplete
+            }
 
             val value = if (length > 0) {
                 String(bytes, pos, length, Charsets.UTF_8)
@@ -124,8 +142,11 @@ class DataSourceParser {
             foundAttrs.add(attrId)
             pos += length
 
+            android.util.Log.d("DataSourceParser", "Attr $attrId value (${value.length} chars): ${value.take(50)}")
+
             // Check if we've received all expected attributes
             if (expectedAttrs.all { it in foundAttrs }) {
+                android.util.Log.d("DataSourceParser", "All expected attributes received")
                 break
             }
         }

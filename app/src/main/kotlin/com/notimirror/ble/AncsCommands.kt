@@ -54,7 +54,7 @@ object NotificationActionId {
  *          for variable-length attrs (Title, Subtitle, Message) the byte followed
  *          by a uint16 LE max-length so iOS knows how many chars to return.
  */
-fun buildGetNotificationAttributesCommand(uid: Int, maxLength: UShort = 1000u): ByteArray {
+fun buildGetNotificationAttributesCommand(uid: Int, maxLength: UShort = 2000u): ByteArray {
     val uidBytes = intToLe32(uid)
     val maxLenBytes = ushortToLe16(maxLength)
 

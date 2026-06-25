@@ -136,16 +136,19 @@ class NotificationHelper(private val context: Context) {
         val channelId = getOrCreateChannelForApp(notification.appIdentifier)
 
         // Build the notification title
+        // For SMS, title is usually the sender's name
         val title = when {
             notification.title.isNotBlank() -> notification.title
-            notification.appIdentifier.isNotBlank() -> notification.appIdentifier.substringAfterLast(".")
+            notification.subtitle.isNotBlank() && notification.appIdentifier == "com.apple.MobileSMS" -> notification.subtitle
+            notification.appIdentifier.isNotBlank() -> AppNameFormatter.format(notification.appIdentifier)
             else -> "iPhone Notification"
         }
 
         // Build the notification text
         val text = when {
             notification.message.isNotBlank() -> notification.message
-            notification.subtitle.isNotBlank() -> notification.subtitle
+            notification.subtitle.isNotBlank() && notification.appIdentifier != "com.apple.MobileSMS" -> notification.subtitle
+            notification.title.isNotBlank() && notification.appIdentifier == "com.apple.MobileSMS" -> notification.title
             else -> "New notification from iPhone"
         }
 
@@ -221,15 +224,25 @@ class NotificationHelper(private val context: Context) {
             builder.extend(carExtender)
 
             // For messaging apps, create a MessagingStyle for better Android Auto display
+            // Use the actual sender's name (from title) not the app name
+            val senderName = when {
+                notification.title.isNotBlank() -> notification.title
+                notification.subtitle.isNotBlank() && notification.appIdentifier == "com.apple.MobileSMS" -> notification.subtitle
+                notification.subtitle.isNotBlank() -> notification.subtitle
+                else -> AppNameFormatter.format(notification.appIdentifier)
+            }
+
             val person = androidx.core.app.Person.Builder()
-                .setName(AppNameFormatter.format(notification.appIdentifier))
+                .setName(senderName)
                 .build()
 
             val messagingStyle = NotificationCompat.MessagingStyle(person)
                 .addMessage(text, System.currentTimeMillis(), person)
 
-            if (notification.subtitle.isNotBlank()) {
-                messagingStyle.setConversationTitle(notification.subtitle)
+            // Set conversation title to app name so we know which app it's from
+            // For SMS, don't set a conversation title as the sender name is enough
+            if (notification.appIdentifier != "com.apple.MobileSMS") {
+                messagingStyle.setConversationTitle(AppNameFormatter.format(notification.appIdentifier))
             }
 
             builder.setStyle(messagingStyle)

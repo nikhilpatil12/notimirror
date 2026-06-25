@@ -61,6 +61,19 @@
             </intent-filter>
         </receiver>
 
+        <!-- Boot receiver for auto-start on device boot -->
+        <receiver
+            android:name=".receiver.BootReceiver"
+            android:exported="true"
+            android:enabled="true"
+            android:directBootAware="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.LOCKED_BOOT_COMPLETED" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+        </receiver>
+
         <!-- Android Auto compatibility -->
         <meta-data
             android:name="com.google.android.gms.car.application"

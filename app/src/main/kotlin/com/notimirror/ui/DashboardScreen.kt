@@ -10,8 +10,10 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import android.content.Intent
 import com.notimirror.ble.ConnectionState
 import com.notimirror.data.AncsCategoryId
 import com.notimirror.data.IPhoneNotification
@@ -28,10 +30,27 @@ fun DashboardScreen(
     onNavigateDebug: () -> Unit,
     onNavigateSettings: () -> Unit
 ) {
+    val context = LocalContext.current
     val notifications by vm.notifications.collectAsState()
     val connectionState by vm.connectionState.collectAsState()
     val showBody by vm.showBody.collectAsState()
     val filteredApps by vm.filteredApps.collectAsState()
+    val lastDeviceAddress by vm.lastDeviceAddress.collectAsState()
+    val autoReconnect by vm.autoReconnect.collectAsState()
+
+    // Auto-connect to saved device on first launch
+    LaunchedEffect(Unit) {
+        if (connectionState == ConnectionState.Disconnected &&
+            autoReconnect &&
+            lastDeviceAddress != null
+        ) {
+            val intent = Intent(context, com.notimirror.service.AncsForegroundService::class.java).apply {
+                action = com.notimirror.service.ACTION_CONNECT
+                putExtra(com.notimirror.service.EXTRA_DEVICE_ADDRESS, lastDeviceAddress)
+            }
+            context.startForegroundService(intent)
+        }
+    }
 
     val visibleNotifications = remember(notifications, filteredApps) {
         if (filteredApps.isEmpty()) notifications

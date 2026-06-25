@@ -89,6 +89,11 @@ class NotificationRepository(
         message: String,
         date: String
     ) {
+        // Log SMS notifications specifically for debugging
+        if (appIdentifier == "com.apple.MobileSMS") {
+            logDebugEvent("📱 SMS: title='$title', subtitle='$subtitle', message='${message.take(100)}'")
+        }
+
         _notifications.update { current ->
             current.map { n ->
                 if (n.uid == uid) {
@@ -100,7 +105,14 @@ class NotificationRepository(
                         date = date
                     )
                     // Show Android notification if enabled and we have content
-                    if (showAndroidNotifications && (title.isNotBlank() || message.isNotBlank())) {
+                    // For SMS, prioritize message over title
+                    val hasContent = if (appIdentifier == "com.apple.MobileSMS") {
+                        message.isNotBlank() || title.isNotBlank() || subtitle.isNotBlank()
+                    } else {
+                        title.isNotBlank() || message.isNotBlank()
+                    }
+
+                    if (showAndroidNotifications && hasContent) {
                         notificationHelper.showNotification(updated)
                     }
                     updated

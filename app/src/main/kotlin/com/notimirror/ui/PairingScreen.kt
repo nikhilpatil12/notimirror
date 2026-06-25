@@ -91,7 +91,7 @@ fun PairingScreen(vm: MainViewModel, onBack: () -> Unit) {
 
             items(scanResults, key = { it.device.address }) { result ->
                 DeviceRow(result) { address ->
-                    connectToDevice(context, address)
+                    connectToDevice(context, address, vm)
                     onBack()
                 }
             }
@@ -202,7 +202,10 @@ private fun OnboardingCard(onDismiss: () -> Unit) {
     }
 }
 
-private fun connectToDevice(context: Context, address: String) {
+private fun connectToDevice(context: Context, address: String, vm: MainViewModel) {
+    // Save the device address for auto-reconnect
+    vm.setLastDeviceAddress(address)
+
     val intent = Intent(context, AncsForegroundService::class.java).apply {
         action = ACTION_CONNECT
         putExtra(EXTRA_DEVICE_ADDRESS, address)

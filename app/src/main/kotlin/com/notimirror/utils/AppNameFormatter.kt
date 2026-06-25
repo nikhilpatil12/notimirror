@@ -48,6 +48,13 @@ object AppNameFormatter {
             "com.spotify.client" -> "Spotify"
             "com.netflix.Netflix" -> "Netflix"
             "tv.twitch" -> "Twitch"
+            // Indian payment and banking apps
+            "in.org.npci.bhim" -> "BHIM UPI"
+            "in.org.npci.bhimupi" -> "BHIM UPI"
+            "net.one97.paytm" -> "Paytm"
+            "com.phonepe.app" -> "PhonePe"
+            "com.google.tez" -> "Google Pay"
+            "com.google.pay" -> "Google Pay"
             "com.reddit.Reddit" -> "Reddit"
             "com.discord.Discord" -> "Discord"
             "com.ubercab.UberClient" -> "Uber"

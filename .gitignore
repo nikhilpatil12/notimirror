@@ -1,0 +1,17 @@
+*.iml
+.gradle
+/local.properties
+/.idea
+.DS_Store
+/build
+/captures
+.externalNativeBuild
+.cxx
+local.properties
+
+# Build outputs
+app/build/
+
+# Gradle wrapper binary — not needed since CI installs Gradle directly
+gradle/wrapper/gradle-wrapper.jar
+

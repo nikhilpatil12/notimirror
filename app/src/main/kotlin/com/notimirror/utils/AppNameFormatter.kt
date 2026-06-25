@@ -1,14 +1,28 @@
 package com.notimirror.utils
 
+import com.notimirror.data.NotificationRepository
+
 /**
- * Formats iOS app bundle identifiers into user-friendly app names
+ * Formats iOS app bundle identifiers into user-friendly app names.
+ *
+ * If a repository is provided, it first checks the dynamic cache of names
+ * fetched from iOS via GetAppAttributes. Falls back to hardcoded mappings
+ * if not found in cache.
  */
 object AppNameFormatter {
 
-    fun format(appIdentifier: String): String {
+    fun format(appIdentifier: String, repository: NotificationRepository? = null): String {
         if (appIdentifier.isBlank()) return "Unknown"
 
-        // Handle common iOS app bundle IDs
+        // Check dynamic cache from iOS first (if repository provided)
+        repository?.let {
+            val cachedName = it.getAppDisplayName(appIdentifier)
+            if (cachedName != appIdentifier) {
+                return cachedName  // Found in cache
+            }
+        }
+
+        // Fall back to hardcoded common iOS app bundle IDs
         return when (appIdentifier) {
             "com.apple.MobileSMS" -> "Messages"
             "com.apple.mobilephone" -> "Phone"

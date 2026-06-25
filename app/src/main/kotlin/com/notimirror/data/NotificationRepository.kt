@@ -37,6 +37,10 @@ class NotificationRepository(
     private val _callHistory = MutableStateFlow(CallHistoryState())
     val callHistory: StateFlow<CallHistoryState> = _callHistory.asStateFlow()
 
+    // App display name cache (bundle ID -> display name from iOS)
+    private val _appDisplayNames = MutableStateFlow<Map<String, String>>(emptyMap())
+    val appDisplayNames: StateFlow<Map<String, String>> = _appDisplayNames.asStateFlow()
+
     fun addOrUpdate(notification: IPhoneNotification) {
         _notifications.update { current ->
             val index = current.indexOfFirst { it.uid == notification.uid }
@@ -48,37 +52,18 @@ class NotificationRepository(
                     "IncomingCall" -> addCallToHistory(notification, CallType.INCOMING)
                     "MissedCall" -> addCallToHistory(notification, CallType.MISSED)
                 }
-                listOf(notification) + current  // newest first
+                // Cap at 100 most recent notifications to avoid performance issues
+                (listOf(notification) + current).take(100)
             }
         }
     }
 
     fun remove(uid: Int) {
-        // Check if this was an incoming call that was not answered (missed call)
-        val removedNotification = _notifications.value.find { it.uid == uid }
-        if (removedNotification?.categoryId?.name == "IncomingCall") {
-            // Check if call was already marked as answered or declined in history
-            val lastCall = _callHistory.value.entries.firstOrNull()
-            if (lastCall?.callType == CallType.INCOMING && !lastCall.wasAnswered) {
-                // This was a missed call - update it in history
-                _callHistory.update { state ->
-                    val updatedEntries = state.entries.toMutableList()
-                    if (updatedEntries.isNotEmpty()) {
-                        updatedEntries[0] = updatedEntries[0].copy(callType = CallType.MISSED)
-                    }
-                    state.copy(
-                        entries = updatedEntries,
-                        missedCallCount = state.missedCallCount + 1
-                    )
-                }
-            }
-        }
-
-        _notifications.update { it.filter { n -> n.uid != uid } }
-        // Cancel Android notification when iOS notification is removed
-        if (showAndroidNotifications) {
-            notificationHelper.cancelNotification(uid)
-        }
+        // Don't remove from repository list (keep accumulating like DMD2)
+        // But DO cancel the Android system notification to stop vibration/sounds
+        // Always cancel regardless of setting - if notification exists, stop it
+        android.util.Log.d("NotificationRepository", "remove() called for uid=$uid")
+        notificationHelper.cancelNotification(uid)
     }
 
     fun updateAttributes(
@@ -137,6 +122,16 @@ class NotificationRepository(
 
     fun clearDebugEvents() {
         _debugEvents.update { emptyList() }
+    }
+
+    fun updateAppDisplayName(appIdentifier: String, displayName: String) {
+        _appDisplayNames.update { current ->
+            current + (appIdentifier to displayName)
+        }
+    }
+
+    fun getAppDisplayName(appIdentifier: String): String {
+        return _appDisplayNames.value[appIdentifier] ?: appIdentifier
     }
 
     // Call history methods

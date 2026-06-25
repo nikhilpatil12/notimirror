@@ -160,9 +160,10 @@ class NotificationHelper(private val context: Context) {
 
         // Select appropriate icon based on category
         val icon = when (notification.categoryId.name) {
-            "IncomingCall", "MissedCall" -> android.R.drawable.stat_sys_phone_call
-            "Email" -> android.R.drawable.sym_action_email
-            "Social" -> android.R.drawable.ic_menu_share
+            "IncomingCall" -> R.drawable.ic_call
+            "MissedCall" -> R.drawable.ic_call_missed
+            "Email" -> R.drawable.ic_email
+            "Social" -> R.drawable.ic_iphone  // Use iPhone icon for social instead of share
             else -> R.drawable.ic_notification
         }
 
@@ -224,7 +225,7 @@ class NotificationHelper(private val context: Context) {
         // Add Android Auto support for messaging notifications
         if (isMessagingApp) {
             // For messaging apps, create a MessagingStyle for better Android Auto display
-            // Use the actual sender's name (from title) not the app name
+            // The sender's name is extracted from the notification
             val senderName = when {
                 notification.title.isNotBlank() -> notification.title
                 notification.subtitle.isNotBlank() && notification.appIdentifier == "com.apple.MobileSMS" -> notification.subtitle
@@ -232,12 +233,36 @@ class NotificationHelper(private val context: Context) {
                 else -> AppNameFormatter.format(notification.appIdentifier)
             }
 
-            val person = androidx.core.app.Person.Builder()
-                .setName(senderName)
+            // CRITICAL: MessagingStyle constructor needs the USER (you), not the sender
+            // Person objects need unique keys for Android Auto to track conversations
+            val user = androidx.core.app.Person.Builder()
+                .setName("Me")  // Represents the user reading the messages
+                .setKey("user_self")  // Unique key for the user
+                .setImportant(false)
                 .build()
 
-            val messagingStyle = NotificationCompat.MessagingStyle(person)
-                .addMessage(text, System.currentTimeMillis(), person)
+            // The sender who sent the message - use sender name as unique key
+            val sender = androidx.core.app.Person.Builder()
+                .setName(senderName)
+                .setKey("sender_${senderName.hashCode()}")  // Unique key per sender
+                .setImportant(true)
+                .build()
+
+            // Use actual notification timestamp, not current time
+            val timestamp = if (notification.date.isNotBlank()) {
+                try {
+                    val formatter = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd'T'HHmmss")
+                    val dt = java.time.LocalDateTime.parse(notification.date, formatter)
+                    dt.atZone(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
+                } catch (e: Exception) {
+                    System.currentTimeMillis()
+                }
+            } else {
+                notification.receivedAt.toEpochMilli()
+            }
+
+            val messagingStyle = NotificationCompat.MessagingStyle(user)
+                .addMessage(text, timestamp, sender)
 
             // Set conversation title to app name so we know which app it's from
             // For SMS, don't set a conversation title as the sender name is enough
@@ -245,7 +270,13 @@ class NotificationHelper(private val context: Context) {
                 messagingStyle.setConversationTitle(AppNameFormatter.format(notification.appIdentifier))
             }
 
+            // Mark as group conversation if there's a conversation title
+            if (notification.appIdentifier != "com.apple.MobileSMS") {
+                messagingStyle.setGroupConversation(false)  // One-on-one chat from app
+            }
+
             builder.setStyle(messagingStyle)
+                .setShortcutId("${notification.appIdentifier}_${senderName.hashCode()}")  // Conversation ID for Android Auto
 
             // Add required Android Auto actions - CRITICAL for Android Auto display
             builder.addAction(createReplyAction(notification.uid))
@@ -261,14 +292,9 @@ class NotificationHelper(private val context: Context) {
 
     private fun showIncomingCallNotification(notification: IPhoneNotification) {
         // Vibrate for incoming call
-        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val pattern = longArrayOf(0, 1000, 500, 1000, 500, 1000) // Ring pattern
-            vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0)) // Repeat
-        } else {
-            @Suppress("DEPRECATION")
-            vibrator.vibrate(longArrayOf(0, 1000, 500, 1000, 500, 1000), 0)
-        }
+        val vibrator = context.getSystemService(Vibrator::class.java)
+        val pattern = longArrayOf(0, 1000, 500, 1000, 500, 1000) // Ring pattern
+        vibrator.vibrate(VibrationEffect.createWaveform(pattern, 0)) // Repeat
 
         // Create intents for answer and decline actions
         val answerIntent = Intent(context, CallActionReceiver::class.java).apply {
@@ -319,7 +345,7 @@ class NotificationHelper(private val context: Context) {
 
         // Build the notification with call-specific styling
         val builder = NotificationCompat.Builder(context, CHANNEL_INCOMING_CALL)
-            .setSmallIcon(android.R.drawable.stat_sys_phone_call)
+            .setSmallIcon(R.drawable.ic_call)
             .setContentTitle("Incoming call on iPhone")
             .setContentText(callerName)
             .setSubText(phoneNumber)
@@ -337,7 +363,7 @@ class NotificationHelper(private val context: Context) {
         // Add answer and decline actions
         if (notification.eventFlags.hasPositiveAction) {
             builder.addAction(
-                android.R.drawable.stat_sys_phone_call,
+                R.drawable.ic_call,
                 "Answer on iPhone",
                 answerPendingIntent
             )
@@ -345,7 +371,7 @@ class NotificationHelper(private val context: Context) {
 
         if (notification.eventFlags.hasNegativeAction) {
             builder.addAction(
-                android.R.drawable.stat_sys_phone_call_forward,
+                R.drawable.ic_call_missed,
                 "Decline",
                 declinePendingIntent
             )
@@ -375,6 +401,7 @@ class NotificationHelper(private val context: Context) {
 
         // Store the notification UID for later vibration cancellation
         activeCallNotificationUid = notification.uid
+        android.util.Log.d("NotificationHelper", "Incoming call notification shown, stored activeCallUid=${notification.uid}")
     }
 
     private var activeCallNotificationUid: Int? = null
@@ -405,7 +432,7 @@ class NotificationHelper(private val context: Context) {
         )
 
         val builder = NotificationCompat.Builder(context, getOrCreateChannelForApp("com.apple.mobilephone"))
-            .setSmallIcon(android.R.drawable.stat_sys_phone_call_forward)
+            .setSmallIcon(R.drawable.ic_call_missed)
             .setContentTitle("Missed call on iPhone")
             .setContentText(callerName)
             .setSubText(phoneNumber)
@@ -432,7 +459,7 @@ class NotificationHelper(private val context: Context) {
             )
 
             builder.addAction(
-                android.R.drawable.stat_sys_phone_call,
+                R.drawable.ic_call,
                 "Call Back",
                 callBackPendingIntent
             )
@@ -445,9 +472,12 @@ class NotificationHelper(private val context: Context) {
     }
 
     fun cancelNotification(uid: Int) {
+        android.util.Log.d("NotificationHelper", "cancelNotification uid=$uid, activeCallUid=$activeCallNotificationUid")
+
         // Stop vibration if this was a call notification
         if (uid == activeCallNotificationUid) {
-            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            android.util.Log.d("NotificationHelper", "Canceling vibration for call uid=$uid")
+            val vibrator = context.getSystemService(Vibrator::class.java)
             vibrator.cancel()
             activeCallNotificationUid = null
         }
@@ -460,7 +490,7 @@ class NotificationHelper(private val context: Context) {
     fun cancelAllNotifications() {
         // Stop any active call vibration
         activeCallNotificationUid?.let {
-            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+            val vibrator = context.getSystemService(Vibrator::class.java)
             vibrator.cancel()
             activeCallNotificationUid = null
         }
@@ -492,7 +522,7 @@ class NotificationHelper(private val context: Context) {
 
         // Create and return the reply action with semantic action for Android Auto
         return NotificationCompat.Action.Builder(
-            android.R.drawable.ic_menu_send,
+            R.drawable.ic_send,
             "Reply",
             replyPendingIntent
         )
@@ -518,7 +548,7 @@ class NotificationHelper(private val context: Context) {
 
         // Create and return the mark as read action with semantic action for Android Auto
         return NotificationCompat.Action.Builder(
-            android.R.drawable.ic_menu_view,
+            R.drawable.ic_mark_read,
             "Mark as read",
             markAsReadPendingIntent
         )
@@ -535,7 +565,7 @@ class CallActionReceiver : BroadcastReceiver() {
         if (notificationUid == -1) return
 
         // Stop vibration
-        val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+        val vibrator = context.getSystemService(Vibrator::class.java)
         vibrator.cancel()
 
         // Get the connection manager and repository from the app container

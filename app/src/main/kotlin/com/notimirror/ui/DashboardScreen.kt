@@ -5,6 +5,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Article
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -38,12 +39,15 @@ fun DashboardScreen(
     val lastDeviceAddress by vm.lastDeviceAddress.collectAsState()
     val autoReconnect by vm.autoReconnect.collectAsState()
 
-    // Auto-connect to saved device on first launch
-    LaunchedEffect(Unit) {
-        if (connectionState == ConnectionState.Disconnected &&
+    // Auto-connect to saved device when address becomes available
+    var hasAttemptedConnection by remember { mutableStateOf(false) }
+    LaunchedEffect(lastDeviceAddress) {
+        if (!hasAttemptedConnection &&
+            connectionState == ConnectionState.Disconnected &&
             autoReconnect &&
             lastDeviceAddress != null
         ) {
+            hasAttemptedConnection = true
             val intent = Intent(context, com.notimirror.service.AncsForegroundService::class.java).apply {
                 action = com.notimirror.service.ACTION_CONNECT
                 putExtra(com.notimirror.service.EXTRA_DEVICE_ADDRESS, lastDeviceAddress)
@@ -52,9 +56,16 @@ fun DashboardScreen(
         }
     }
 
-    val visibleNotifications = remember(notifications, filteredApps) {
-        if (filteredApps.isEmpty()) notifications
-        else notifications.filter { it.appIdentifier !in filteredApps }
+    // Use derivedStateOf for better performance - only recalculates when dependencies change
+    val visibleNotifications by remember {
+        derivedStateOf {
+            // Only show notifications that have any displayable content
+            val withContent = notifications.filter {
+                it.appIdentifier.isNotBlank() || it.title.isNotBlank() || it.message.isNotBlank()
+            }
+            if (filteredApps.isEmpty()) withContent
+            else withContent.filter { it.appIdentifier !in filteredApps }
+        }
     }
 
     Scaffold(
@@ -103,7 +114,7 @@ fun DashboardScreen(
                         verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         items(visibleNotifications, key = { it.uid }) { notif ->
-                            NotificationCard(notif, showBody)
+                            NotificationCard(notif, showBody, vm.repository)
                         }
                     }
                 }
@@ -159,7 +170,16 @@ private fun EmptyState(connectionState: ConnectionState, onNavigatePairing: () -
 }
 
 @Composable
-private fun NotificationCard(notif: IPhoneNotification, showBody: Boolean) {
+private fun NotificationCard(
+    notif: IPhoneNotification,
+    showBody: Boolean,
+    repository: com.notimirror.data.NotificationRepository
+) {
+    // Memoize app name formatting to avoid repeated lookups
+    val appName = remember(notif.appIdentifier) {
+        AppNameFormatter.format(notif.appIdentifier, repository)
+    }
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -177,7 +197,7 @@ private fun NotificationCard(notif: IPhoneNotification, showBody: Boolean) {
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = AppNameFormatter.format(notif.appIdentifier),
+                        text = appName,
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary
                     )
@@ -240,7 +260,7 @@ private fun CategoryIcon(category: AncsCategoryId) {
         AncsCategoryId.Social -> Icons.Default.People
         AncsCategoryId.Email -> Icons.Default.Email
         AncsCategoryId.Schedule -> Icons.Default.CalendarToday
-        AncsCategoryId.News -> Icons.Default.Article
+        AncsCategoryId.News -> Icons.AutoMirrored.Filled.Article
         AncsCategoryId.HealthAndFitness -> Icons.Default.FitnessCenter
         AncsCategoryId.BusinessAndFinance -> Icons.Default.BusinessCenter
         AncsCategoryId.Location -> Icons.Default.LocationOn

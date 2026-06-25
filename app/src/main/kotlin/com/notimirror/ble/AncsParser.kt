@@ -30,46 +30,32 @@ fun parseNotificationSource(data: ByteArray): AncsNotificationEvent? {
 /**
  * Accumulator for multi-packet Data Source responses.
  *
- * iOS may fragment a GetNotificationAttributes response across several BLE packets.
+ * iOS may fragment responses across several BLE packets.
  * This class buffers incoming bytes and attempts a parse after each append.
  *
- * GetNotificationAttributes response layout (§3.11.2 response):
- *   Byte 0:       CommandID (0x00 = GetNotificationAttributes)
- *   Bytes 1-4:    NotificationUID (uint32 LE)
- *   [Repeated per attribute]:
- *     Byte:       AttributeID
- *     2 Bytes LE: Length (uint16) — 0 if attribute not present
- *     N Bytes:    UTF-8 string (no null terminator)
+ * Handles two types of responses:
+ * 1. GetNotificationAttributes (§3.11.2 response):
+ *    Byte 0:       CommandID (0x00)
+ *    Bytes 1-4:    NotificationUID (uint32 LE)
+ *    [attributes...]
+ *
+ * 2. GetAppAttributes (§3.11.4 response):
+ *    Byte 0:       CommandID (0x01)
+ *    Bytes 1..n:   AppIdentifier (null-terminated UTF-8)
+ *    [attributes...]
  */
 class DataSourceParser {
     private val buffer = mutableListOf<Byte>()
-    private var lastPacketHash: String? = null
-    private var lastPacketTime: Long = 0
 
     /** Append a BLE packet fragment; returns a parsed result if complete, null if more data needed. */
     @Synchronized
-    fun append(data: ByteArray): ParsedAttributes? {
-        // Create a hash of this packet to detect duplicates
-        val packetHash = data.joinToString("") { "%02X".format(it) }
-        val now = System.currentTimeMillis()
-
-        // Skip duplicate packets that arrive within 20ms (reduced from 50ms for faster multi-packet responses)
-        if (packetHash == lastPacketHash && (now - lastPacketTime) < 20) {
-            android.util.Log.d("DataSourceParser", "Skipping duplicate packet")
-            return null  // Skip duplicate
-        }
-
-        lastPacketHash = packetHash
-        lastPacketTime = now
-
-        // Check if this is the start of a new response (only when buffer is empty or this is clearly a new command)
-        if (data.isNotEmpty() && data[0] == AncsCommandId.GET_NOTIFICATION_ATTRIBUTES) {
-            // Only clear if we have a reasonable buffer size already (likely a complete or partial response)
-            // Don't clear if buffer is small as it might be the beginning of a multi-packet response
-            if (buffer.size > 100) {
-                android.util.Log.d("DataSourceParser", "New response detected (buffer was ${buffer.size}), clearing buffer")
-                buffer.clear()
-            }
+    fun append(data: ByteArray): DataSourceResponse? {
+        // Check if this is the start of a new response (only when buffer is empty or very small)
+        if (data.isNotEmpty() &&
+            (data[0] == AncsCommandId.GET_NOTIFICATION_ATTRIBUTES || data[0] == AncsCommandId.GET_APP_ATTRIBUTES) &&
+            buffer.size > 50) {
+            android.util.Log.d("DataSourceParser", "New response detected, clearing buffer (was ${buffer.size} bytes)")
+            buffer.clear()
         }
 
         val beforeSize = buffer.size
@@ -82,17 +68,25 @@ class DataSourceParser {
     @Synchronized
     fun reset() { buffer.clear() }
 
-    private fun tryParse(): ParsedAttributes? {
+    private fun tryParse(): DataSourceResponse? {
         val bytes = buffer.toByteArray()
-        // Minimum: CommandID(1) + UID(4) + at least one attr header(3)
-        if (bytes.size < 5) return null
+        if (bytes.isEmpty()) return null
 
         val commandId = bytes[0]
-        if (commandId != AncsCommandId.GET_NOTIFICATION_ATTRIBUTES) {
-            // Unrecognised command — discard buffer
-            buffer.clear()
-            return null
+        return when (commandId) {
+            AncsCommandId.GET_NOTIFICATION_ATTRIBUTES -> parseNotificationAttributes(bytes)
+            AncsCommandId.GET_APP_ATTRIBUTES -> parseAppAttributes(bytes)
+            else -> {
+                android.util.Log.w("DataSourceParser", "Unknown command ID: $commandId")
+                buffer.clear()
+                null
+            }
         }
+    }
+
+    private fun parseNotificationAttributes(bytes: ByteArray): ParsedNotificationAttributes? {
+        // Minimum: CommandID(1) + UID(4) + at least one attr header(3)
+        if (bytes.size < 5) return null
 
         val uid = le32ToInt(bytes, 1)
         val attrs = mutableMapOf<Byte, String>()
@@ -154,24 +148,94 @@ class DataSourceParser {
         // Successful parse — clear buffer for next response
         buffer.clear()
 
-        return ParsedAttributes(
+        return ParsedNotificationAttributes(
             uid = uid,
             appIdentifier = attrs[NotificationAttributeId.APP_IDENTIFIER] ?: "",
             title         = attrs[NotificationAttributeId.TITLE]          ?: "",
             subtitle      = attrs[NotificationAttributeId.SUBTITLE]       ?: "",
             message       = attrs[NotificationAttributeId.MESSAGE]        ?: "",
             date          = attrs[NotificationAttributeId.DATE]           ?: "",
-            rawAttrs = attrs  // Add raw attrs for debugging
+            rawAttrs = attrs
         )
+    }
+
+    private fun parseAppAttributes(bytes: ByteArray): ParsedAppAttributes? {
+        // Minimum: CommandID(1) + AppID (at least 1 char + null) + attr header(3)
+        if (bytes.size < 6) return null
+
+        // Find the null terminator for the app identifier
+        var nullPos = -1
+        for (i in 1 until bytes.size) {
+            if (bytes[i] == 0.toByte()) {
+                nullPos = i
+                break
+            }
+        }
+
+        if (nullPos == -1 || nullPos == 1) {
+            // No null terminator found or empty app ID
+            return null
+        }
+
+        val appIdentifier = String(bytes, 1, nullPos - 1, Charsets.UTF_8)
+        android.util.Log.d("DataSourceParser", "Parsing GetAppAttributes response for: $appIdentifier")
+
+        var pos = nullPos + 1  // Skip past null terminator
+        val attrs = mutableMapOf<Byte, String>()
+
+        while (pos < bytes.size) {
+            // Need at least attributeID(1) + length(2)
+            if (pos + 3 > bytes.size) {
+                android.util.Log.d("DataSourceParser", "Incomplete app attr header at pos=$pos")
+                return null
+            }
+
+            val attrId = bytes[pos]
+            val length = le16ToInt(bytes, pos + 1)
+            pos += 3
+
+            if (length > 1000) {
+                android.util.Log.e("DataSourceParser", "Invalid app attr length: $length")
+                buffer.clear()
+                return null
+            }
+
+            if (pos + length > bytes.size) {
+                android.util.Log.d("DataSourceParser", "Incomplete app attr value, need $length bytes")
+                return null
+            }
+
+            val value = if (length > 0) {
+                String(bytes, pos, length, Charsets.UTF_8)
+            } else ""
+
+            attrs[attrId] = value
+            pos += length
+
+            android.util.Log.d("DataSourceParser", "App attr $attrId = '$value'")
+        }
+
+        buffer.clear()
+
+        val displayName = attrs[AppAttributeId.DISPLAY_NAME] ?: ""
+        return ParsedAppAttributes(appIdentifier, displayName)
     }
 }
 
-data class ParsedAttributes(
+// Sealed class for different Data Source responses
+sealed class DataSourceResponse
+
+data class ParsedNotificationAttributes(
     val uid: Int,
     val appIdentifier: String,
     val title: String,
     val subtitle: String,
     val message: String,
     val date: String,
-    val rawAttrs: Map<Byte, String> = emptyMap()  // For debugging
-)
+    val rawAttrs: Map<Byte, String> = emptyMap()
+) : DataSourceResponse()
+
+data class ParsedAppAttributes(
+    val appIdentifier: String,
+    val displayName: String
+) : DataSourceResponse()

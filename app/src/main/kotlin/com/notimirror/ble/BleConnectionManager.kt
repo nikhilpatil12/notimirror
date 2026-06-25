@@ -54,6 +54,11 @@ class BleConnectionManager(private val context: Context) {
     private val writeQueue = ArrayDeque<Pair<UUID, ByteArray>>()
     private var writeInFlight = false
 
+    // Deduplicate BLE callbacks - Android delivers duplicates across threads
+    // Map of UUID -> (packet hash, timestamp)
+    private val recentPackets = mutableMapOf<UUID, String>()
+    private var lastCleanupTime = 0L
+
     private val gattCallback = object : BluetoothGattCallback() {
 
         override fun onConnectionStateChange(gatt: BluetoothGatt, status: Int, newState: Int) {
@@ -93,9 +98,34 @@ class BleConnectionManager(private val context: Context) {
             characteristic: BluetoothGattCharacteristic,
             value: ByteArray
         ) {
-            Log.d(TAG, "Characteristic changed: ${characteristic.uuid}, ${value.size} bytes")
+            // CRITICAL: Copy byte array IMMEDIATELY - Android BLE reuses buffers
+            val dataCopy = value.copyOf()
+
+            // Deduplicate synchronously - Android delivers same packet to multiple threads
+            synchronized(recentPackets) {
+                val packetHash = dataCopy.joinToString("") { "%02X".format(it) }
+                val uuid = characteristic.uuid
+
+                // Check if we've seen this exact packet for this characteristic
+                if (recentPackets[uuid] == packetHash) {
+                    Log.d(TAG, "Skipping duplicate packet for $uuid")
+                    return
+                }
+
+                // Track this packet
+                recentPackets[uuid] = packetHash
+
+                // Periodically clean up (every 500ms)
+                val now = System.currentTimeMillis()
+                if (now - lastCleanupTime > 500) {
+                    recentPackets.clear()
+                    lastCleanupTime = now
+                }
+            }
+
+            Log.d(TAG, "Characteristic changed: ${characteristic.uuid}, ${dataCopy.size} bytes")
             scope.launch {
-                _gattEvents.emit(GattEvent.CharacteristicChanged(characteristic.uuid, value))
+                _gattEvents.emit(GattEvent.CharacteristicChanged(characteristic.uuid, dataCopy))
             }
         }
 
@@ -106,8 +136,30 @@ class BleConnectionManager(private val context: Context) {
         ) {
             @Suppress("DEPRECATION")
             val value = characteristic.value ?: return
+            // CRITICAL: Copy byte array IMMEDIATELY - Android BLE reuses buffers
+            val dataCopy = value.copyOf()
+
+            // Deduplicate synchronously
+            synchronized(recentPackets) {
+                val packetHash = dataCopy.joinToString("") { "%02X".format(it) }
+                val uuid = characteristic.uuid
+
+                if (recentPackets[uuid] == packetHash) {
+                    Log.d(TAG, "Skipping duplicate packet for $uuid")
+                    return
+                }
+
+                recentPackets[uuid] = packetHash
+
+                val now = System.currentTimeMillis()
+                if (now - lastCleanupTime > 500) {
+                    recentPackets.clear()
+                    lastCleanupTime = now
+                }
+            }
+
             scope.launch {
-                _gattEvents.emit(GattEvent.CharacteristicChanged(characteristic.uuid, value))
+                _gattEvents.emit(GattEvent.CharacteristicChanged(characteristic.uuid, dataCopy))
             }
         }
 

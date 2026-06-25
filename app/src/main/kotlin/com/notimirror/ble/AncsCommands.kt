@@ -44,6 +44,11 @@ object NotificationActionId {
     const val NEGATIVE: Byte = 1
 }
 
+// Attribute IDs for GetAppAttributes (§3.11.4)
+object AppAttributeId {
+    const val DISPLAY_NAME: Byte = 0
+}
+
 /**
  * Builds the GetNotificationAttributes command packet (ANCS spec §3.11.2).
  *
@@ -85,6 +90,27 @@ fun buildPerformNotificationActionCommand(uid: Int, actionId: Byte): ByteArray {
         AncsCommandId.PERFORM_NOTIFICATION_ACTION,
         uidBytes[0], uidBytes[1], uidBytes[2], uidBytes[3],
         actionId
+    )
+}
+
+/**
+ * Builds the GetAppAttributes command packet (ANCS spec §3.11.4).
+ *
+ * Layout:
+ *   [0]     CommandID = 0x01
+ *   [1..n]  AppIdentifier (null-terminated UTF-8 string, e.g. "com.apple.MobileSMS\0")
+ *   [n+1..] AttributeIDs to request (we request DisplayName = 0x00)
+ *
+ * Returns the display name for the given app bundle identifier.
+ */
+fun buildGetAppAttributesCommand(appIdentifier: String): ByteArray {
+    val appIdBytes = appIdentifier.toByteArray(Charsets.UTF_8)
+
+    return byteArrayOf(
+        AncsCommandId.GET_APP_ATTRIBUTES,
+        *appIdBytes,
+        0, // null terminator
+        AppAttributeId.DISPLAY_NAME
     )
 }
 

@@ -7,8 +7,10 @@ import com.notimirror.data.NotificationRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 import java.time.Instant
 
 private const val TAG = "AncsClient"
@@ -29,8 +31,10 @@ class AncsClient(
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val dataSourceParser = DataSourceParser()
-    private val processedUids = mutableSetOf<Int>()
-    private var lastProcessedTime = 0L
+
+    // Cache of app bundle ID -> display name fetched from iOS
+    private val appNameCache = mutableMapOf<String, String>()
+    private val appNameRequests = mutableSetOf<String>() // Track pending requests
 
     init {
         observeConnectionState()
@@ -61,10 +65,13 @@ class AncsClient(
     }
 
     private fun subscribeToAncsCharacteristics() {
-        val nsOk = connectionManager.enableNotifications(AncsUuids.NOTIFICATION_SOURCE)
-        val dsOk = connectionManager.enableNotifications(AncsUuids.DATA_SOURCE)
-        Log.d(TAG, "NS subscription=$nsOk, DS subscription=$dsOk")
-        repository.logDebugEvent("Subscribed NS=$nsOk DS=$dsOk")
+        scope.launch {
+            val nsOk = connectionManager.enableNotifications(AncsUuids.NOTIFICATION_SOURCE)
+            delay(200)  // Wait for NS descriptor write to complete
+            val dsOk = connectionManager.enableNotifications(AncsUuids.DATA_SOURCE)
+            Log.d(TAG, "NS subscription=$nsOk, DS subscription=$dsOk")
+            repository.logDebugEvent("Subscribed NS=$nsOk DS=$dsOk")
+        }
     }
 
     private fun handleCharacteristicChanged(event: GattEvent.CharacteristicChanged) {
@@ -114,6 +121,9 @@ class AncsClient(
                 connectionManager.writeControlPoint(cmd)
             }
             AncsEventId.NotificationRemoved -> {
+                // Cancel Android system notification (stops vibration) but keep in repository list
+                Log.d(TAG, "NotificationRemoved uid=${event.notificationUid} - calling repository.remove()")
+                repository.logDebugEvent("NotificationRemoved uid=${event.notificationUid} (canceling system notification)")
                 repository.remove(event.notificationUid)
             }
         }
@@ -133,23 +143,13 @@ class AncsClient(
 
         val parsed = dataSourceParser.append(data) ?: return
 
-        // Check if we've already processed this UID recently
-        if (parsed.uid in processedUids) {
-            val now = System.currentTimeMillis()
-            if (now - lastProcessedTime < 1000) {
-                Log.d(TAG, "Skipping already processed uid=${parsed.uid}")
-                return
-            }
+        when (parsed) {
+            is ParsedNotificationAttributes -> handleNotificationAttributesResponse(parsed)
+            is ParsedAppAttributes -> handleAppAttributesResponse(parsed)
         }
+    }
 
-        processedUids.add(parsed.uid)
-        lastProcessedTime = System.currentTimeMillis()
-
-        // Clean up old UIDs periodically
-        if (processedUids.size > 20) {
-            processedUids.clear()
-        }
-
+    private fun handleNotificationAttributesResponse(parsed: ParsedNotificationAttributes) {
         // Log raw attributes received with their IDs and lengths
         val attrDetails = if (parsed.rawAttrs.isEmpty()) {
             "NO ATTRIBUTES RECEIVED"
@@ -181,6 +181,13 @@ class AncsClient(
             repository.logDebugEvent("⚠️ App identifier missing for uid=${parsed.uid}")
         }
 
+        // Request app display name if we haven't seen this app before
+        if (parsed.appIdentifier.isNotBlank() &&
+            parsed.appIdentifier !in appNameCache &&
+            parsed.appIdentifier !in appNameRequests) {
+            requestAppDisplayName(parsed.appIdentifier)
+        }
+
         repository.updateAttributes(
             uid           = parsed.uid,
             appIdentifier = parsed.appIdentifier,
@@ -189,6 +196,35 @@ class AncsClient(
             message       = parsed.message,
             date          = parsed.date
         )
+    }
+
+    private fun handleAppAttributesResponse(parsed: ParsedAppAttributes) {
+        Log.d(TAG, "Received app name: ${parsed.appIdentifier} = '${parsed.displayName}'")
+        repository.logDebugEvent("📱 App name: ${parsed.appIdentifier} = '${parsed.displayName}'")
+
+        // Cache the display name
+        appNameCache[parsed.appIdentifier] = parsed.displayName
+        appNameRequests.remove(parsed.appIdentifier)
+
+        // Update repository with the new app name for display
+        repository.updateAppDisplayName(parsed.appIdentifier, parsed.displayName)
+    }
+
+    private fun requestAppDisplayName(appIdentifier: String) {
+        Log.d(TAG, "Requesting display name for: $appIdentifier")
+        repository.logDebugEvent("→ GetAppAttrs for $appIdentifier")
+
+        appNameRequests.add(appIdentifier)
+        val cmd = buildGetAppAttributesCommand(appIdentifier)
+        connectionManager.writeControlPoint(cmd)
+    }
+
+    /**
+     * Get cached app display name or return the bundle ID.
+     * Public method for NotificationRepository to use.
+     */
+    fun getAppDisplayName(appIdentifier: String): String {
+        return appNameCache[appIdentifier] ?: appIdentifier
     }
 }
 

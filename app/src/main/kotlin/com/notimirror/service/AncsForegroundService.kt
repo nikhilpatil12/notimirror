@@ -59,6 +59,11 @@ class AncsForegroundService : Service() {
         createNotificationChannel()
         startForeground(NOTIFICATION_ID, buildNotification("Waiting for iPhone…"))
         observeConnectionState()
+
+        // Load last connected device from settings
+        scope.launch {
+            targetAddress = settings.lastDeviceAddress.first()
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -67,6 +72,7 @@ class AncsForegroundService : Service() {
                 val address = intent.getStringExtra(EXTRA_DEVICE_ADDRESS)
                 if (address != null) {
                     targetAddress = address
+                    scope.launch { settings.setLastDeviceAddress(address) }
                     reconnectToAddress(address)
                 } else {
                     scanAndConnect()
@@ -111,6 +117,7 @@ class AncsForegroundService : Service() {
 
             val device = event.result.device
             targetAddress = device.address
+            settings.setLastDeviceAddress(device.address)
             Log.d(TAG, "Found ANCS device: ${device.address}")
             updateNotification("Connecting to ${device.name ?: device.address}…")
             connectionManager.connect(device)

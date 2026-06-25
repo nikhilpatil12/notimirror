@@ -6,7 +6,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -24,8 +24,11 @@ fun DebugScreen(vm: MainViewModel, onBack: () -> Unit) {
     val connectionState by vm.connectionState.collectAsState()
     val listState = rememberLazyListState()
 
-    LaunchedEffect(debugEvents.size) {
-        if (debugEvents.isNotEmpty()) listState.animateScrollToItem(0)
+    // Auto-scroll only when new events arrive, not on every recomposition
+    LaunchedEffect(debugEvents.firstOrNull()) {
+        if (debugEvents.isNotEmpty() && listState.firstVisibleItemIndex <= 5) {
+            listState.scrollToItem(0)  // Use scrollToItem instead of animateScrollToItem for performance
+        }
     }
 
     Scaffold(
@@ -34,7 +37,7 @@ fun DebugScreen(vm: MainViewModel, onBack: () -> Unit) {
                 title = { Text("Debug — ANCS Events") },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Back")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
@@ -87,9 +90,12 @@ fun DebugScreen(vm: MainViewModel, onBack: () -> Unit) {
                     contentPadding = PaddingValues(8.dp),
                     verticalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
-                    items(debugEvents) { line ->
+                    items(
+                        count = debugEvents.size,
+                        key = { index -> "$index-${debugEvents[index].hashCode()}" }
+                    ) { index ->
                         Text(
-                            text = line,
+                            text = debugEvents[index],
                             fontFamily = FontFamily.Monospace,
                             fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onBackground.copy(alpha = 0.85f),

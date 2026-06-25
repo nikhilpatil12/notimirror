@@ -50,17 +50,7 @@ class DataSourceParser {
     /** Append a BLE packet fragment; returns a parsed result if complete, null if more data needed. */
     @Synchronized
     fun append(data: ByteArray): DataSourceResponse? {
-        // Check if this is the start of a new response (only when buffer is empty or very small)
-        if (data.isNotEmpty() &&
-            (data[0] == AncsCommandId.GET_NOTIFICATION_ATTRIBUTES || data[0] == AncsCommandId.GET_APP_ATTRIBUTES) &&
-            buffer.size > 50) {
-            android.util.Log.d("DataSourceParser", "New response detected, clearing buffer (was ${buffer.size} bytes)")
-            buffer.clear()
-        }
-
-        val beforeSize = buffer.size
         buffer.addAll(data.toList())
-        android.util.Log.d("DataSourceParser", "Buffer: $beforeSize -> ${buffer.size} bytes, packet size: ${data.size}")
 
         return tryParse()
     }
@@ -105,15 +95,12 @@ class DataSourceParser {
         while (pos < bytes.size) {
             // Need at least attributeID(1) + length(2)
             if (pos + 3 > bytes.size) {
-                android.util.Log.d("DataSourceParser", "Incomplete attribute header at pos=$pos, buffer size=${bytes.size}")
                 return null  // incomplete, wait for more
             }
 
             val attrId = bytes[pos]
             val length = le16ToInt(bytes, pos + 1)
             pos += 3
-
-            android.util.Log.d("DataSourceParser", "Parsing attr $attrId, length=$length at pos=${pos-3}")
 
             // Sanity check for length
             if (length > 5000) {
@@ -124,7 +111,6 @@ class DataSourceParser {
 
             // Need `length` more bytes for the string value
             if (pos + length > bytes.size) {
-                android.util.Log.d("DataSourceParser", "Incomplete attribute value at pos=$pos, need $length bytes, have ${bytes.size - pos}")
                 return null  // incomplete
             }
 
@@ -136,11 +122,8 @@ class DataSourceParser {
             foundAttrs.add(attrId)
             pos += length
 
-            android.util.Log.d("DataSourceParser", "Attr $attrId value (${value.length} chars): ${value.take(50)}")
-
             // Check if we've received all expected attributes
             if (expectedAttrs.all { it in foundAttrs }) {
-                android.util.Log.d("DataSourceParser", "All expected attributes received")
                 break
             }
         }
@@ -178,7 +161,6 @@ class DataSourceParser {
         }
 
         val appIdentifier = String(bytes, 1, nullPos - 1, Charsets.UTF_8)
-        android.util.Log.d("DataSourceParser", "Parsing GetAppAttributes response for: $appIdentifier")
 
         var pos = nullPos + 1  // Skip past null terminator
         val attrs = mutableMapOf<Byte, String>()
@@ -186,7 +168,6 @@ class DataSourceParser {
         while (pos < bytes.size) {
             // Need at least attributeID(1) + length(2)
             if (pos + 3 > bytes.size) {
-                android.util.Log.d("DataSourceParser", "Incomplete app attr header at pos=$pos")
                 return null
             }
 
@@ -201,7 +182,6 @@ class DataSourceParser {
             }
 
             if (pos + length > bytes.size) {
-                android.util.Log.d("DataSourceParser", "Incomplete app attr value, need $length bytes")
                 return null
             }
 
@@ -211,8 +191,6 @@ class DataSourceParser {
 
             attrs[attrId] = value
             pos += length
-
-            android.util.Log.d("DataSourceParser", "App attr $attrId = '$value'")
         }
 
         buffer.clear()

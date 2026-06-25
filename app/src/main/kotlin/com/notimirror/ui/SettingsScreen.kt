@@ -12,6 +12,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import com.notimirror.BuildConfig
 import com.notimirror.viewmodel.MainViewModel
 import com.notimirror.utils.AppNameFormatter
 
@@ -22,6 +23,7 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val keepScreenAwake by vm.keepScreenAwake.collectAsState()
     val autoReconnect by vm.autoReconnect.collectAsState()
     val showAndroidNotifications by vm.showAndroidNotifications.collectAsState()
+    val verboseDebugLogging by vm.verboseDebugLogging.collectAsState()
     val filteredApps by vm.filteredApps.collectAsState()
     val notifications by vm.notifications.collectAsState()
 
@@ -117,6 +119,19 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
             }
 
             item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
+            item { SectionHeader("Debug") }
+
+            item {
+                ToggleRow(
+                    icon = Icons.Default.BugReport,
+                    title = "Verbose BLE logging",
+                    subtitle = "Include raw packet hex and parsed attribute details in Debug",
+                    checked = verboseDebugLogging,
+                    onToggle = { vm.setVerboseDebugLogging(it) }
+                )
+            }
+
+            item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
             item { SectionHeader("Data") }
 
             item {
@@ -132,6 +147,19 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
                         interactionSource = clearSource,
                         indication = null
                     ) { vm.clearNotifications() }
+                )
+            }
+
+            item { HorizontalDivider(modifier = Modifier.padding(vertical = 8.dp)) }
+            item { SectionHeader("About") }
+
+            item {
+                ListItem(
+                    headlineContent = { Text("Version") },
+                    supportingContent = { Text("${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})") },
+                    leadingContent = {
+                        Icon(Icons.Default.Info, contentDescription = null)
+                    }
                 )
             }
         }

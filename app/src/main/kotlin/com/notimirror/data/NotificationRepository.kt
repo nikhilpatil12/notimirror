@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
+import kotlinx.coroutines.launch
 
 class NotificationRepository(
     private val context: Context,
@@ -18,13 +19,7 @@ class NotificationRepository(
     private val notificationHelper = NotificationHelper(context)
     private val scope = CoroutineScope(Dispatchers.Main)
     private var showAndroidNotifications = false
-
-    init {
-        // Observe the setting for showing Android notifications
-        appSettings.showAndroidNotifications.onEach { enabled ->
-            showAndroidNotifications = enabled
-        }.launchIn(scope)
-    }
+    private var verboseDebugLogging = false
 
     private val _notifications = MutableStateFlow<List<IPhoneNotification>>(emptyList())
     val notifications: StateFlow<List<IPhoneNotification>> = _notifications.asStateFlow()
@@ -40,6 +35,21 @@ class NotificationRepository(
     // App display name cache (bundle ID -> display name from iOS)
     private val _appDisplayNames = MutableStateFlow<Map<String, String>>(emptyMap())
     val appDisplayNames: StateFlow<Map<String, String>> = _appDisplayNames.asStateFlow()
+
+    init {
+        // Observe the setting for showing Android notifications
+        appSettings.showAndroidNotifications.onEach { enabled ->
+            showAndroidNotifications = enabled
+        }.launchIn(scope)
+
+        appSettings.appDisplayNames.onEach { names ->
+            _appDisplayNames.value = names
+        }.launchIn(scope)
+
+        appSettings.verboseDebugLogging.onEach { enabled ->
+            verboseDebugLogging = enabled
+        }.launchIn(scope)
+    }
 
     fun addOrUpdate(notification: IPhoneNotification) {
         _notifications.update { current ->
@@ -120,6 +130,14 @@ class NotificationRepository(
         }
     }
 
+    fun logVerboseDebugEvent(event: String) {
+        if (verboseDebugLogging) {
+            logDebugEvent(event)
+        }
+    }
+
+    fun isVerboseDebugLoggingEnabled(): Boolean = verboseDebugLogging
+
     fun clearDebugEvents() {
         _debugEvents.update { emptyList() }
     }
@@ -127,6 +145,9 @@ class NotificationRepository(
     fun updateAppDisplayName(appIdentifier: String, displayName: String) {
         _appDisplayNames.update { current ->
             current + (appIdentifier to displayName)
+        }
+        scope.launch {
+            appSettings.setAppDisplayName(appIdentifier, displayName)
         }
     }
 

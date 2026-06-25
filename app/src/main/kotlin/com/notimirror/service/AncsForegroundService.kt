@@ -22,6 +22,7 @@ import com.notimirror.ble.ScanEvent
 import com.notimirror.data.AppSettings
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -51,6 +52,7 @@ class AncsForegroundService : Service() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private var targetAddress: String? = null
     private var reconnectEnabled = true
+    private var reconnectJob: Job? = null
 
     override fun onCreate() {
         super.onCreate()
@@ -69,6 +71,8 @@ class AncsForegroundService : Service() {
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         when (intent?.action) {
             ACTION_CONNECT -> {
+                cancelPendingReconnect()
+                reconnectEnabled = true
                 val address = intent.getStringExtra(EXTRA_DEVICE_ADDRESS)
                 if (address != null) {
                     targetAddress = address
@@ -80,6 +84,7 @@ class AncsForegroundService : Service() {
             }
             ACTION_DISCONNECT -> {
                 reconnectEnabled = false
+                cancelPendingReconnect()
                 connectionManager.disconnect()
                 stopSelf()
             }
@@ -90,6 +95,7 @@ class AncsForegroundService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
+        cancelPendingReconnect()
         scope.cancel()
         connectionManager.disconnect()
         super.onDestroy()
@@ -110,6 +116,7 @@ class AncsForegroundService : Service() {
      */
     private fun scanAndConnect() {
         scope.launch {
+            cancelPendingReconnect()
             updateNotification("Scanning for iPhone…")
             val event = bleScanner.scanForAncsDevices()
                 .filterIsInstance<ScanEvent.DeviceFound>()
@@ -127,14 +134,22 @@ class AncsForegroundService : Service() {
     private fun observeConnectionState() {
         connectionManager.connectionState.onEach { state ->
             when (state) {
-                is ConnectionState.ServiceDiscovered ->
+                is ConnectionState.ServiceDiscovered -> {
+                    cancelPendingReconnect()
                     updateNotification(if (state.hasAncs) "iPhone connected" else "Connected (no ANCS)")
+                }
                 ConnectionState.Disconnected -> {
                     updateNotification("Disconnected")
                     maybeReconnect()
                 }
-                ConnectionState.Connecting -> updateNotification("Connecting…")
-                ConnectionState.Connected -> updateNotification("Discovering services…")
+                ConnectionState.Connecting -> {
+                    cancelPendingReconnect()
+                    updateNotification("Connecting…")
+                }
+                ConnectionState.Connected -> {
+                    cancelPendingReconnect()
+                    updateNotification("Discovering services…")
+                }
                 is ConnectionState.Error -> {
                     updateNotification("Error: ${state.message}")
                     maybeReconnect()
@@ -146,14 +161,20 @@ class AncsForegroundService : Service() {
     private fun maybeReconnect() {
         if (!reconnectEnabled) return
         val address = targetAddress ?: return
+        if (reconnectJob?.isActive == true) return
 
-        scope.launch {
+        reconnectJob = scope.launch {
             val autoReconnect = settings.autoReconnect.first()
             if (!autoReconnect) return@launch
             Log.d(TAG, "Auto-reconnecting in 5s…")
             delay(5_000)
             reconnectToAddress(address)
         }
+    }
+
+    private fun cancelPendingReconnect() {
+        reconnectJob?.cancel()
+        reconnectJob = null
     }
 
     private fun createNotificationChannel() {

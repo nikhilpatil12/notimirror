@@ -2,11 +2,13 @@
 
 An Android app that mirrors iPhone notifications to an Android phone over Bluetooth Low Energy using Apple's **ANCS** (Apple Notification Center Service) protocol.
 
+Current app version: **1.1.0** (`versionCode` 2).
+
 ---
 
 ## How It Works
 
-ANCS is a BLE GATT service that Apple exposes on iPhones once a Bluetooth bond exists between the iPhone and an external accessory. NotiMirror acts as that accessory: it connects over BLE, subscribes to notification events, fetches full notification details, and displays them in a live dashboard.
+ANCS is a BLE GATT service that Apple exposes on iPhones once a Bluetooth bond exists between the iPhone and an external accessory. NotiMirror acts as that accessory: it connects over BLE, subscribes to notification events, fetches full notification details, and displays them in a live dashboard. It can also mirror supported notifications into the Android notification shade.
 
 No jailbreak, no CarPlay, no MFi chip required — only a standard Bluetooth bond.
 
@@ -40,6 +42,8 @@ Without this toggle iOS will not send ANCS events to the Android device.
 4. Select your iPhone from the scanned device list.
 5. NotiMirror starts a foreground service and connects over BLE.
 6. Incoming iPhone notifications will appear on the dashboard within 1–2 seconds.
+
+After the first successful connection, NotiMirror remembers the last device address and can auto-reconnect when the service starts or the Bluetooth link drops.
 
 ---
 
@@ -107,6 +111,32 @@ MainViewModel               ← bridges Repository/Settings to UI
 
 ---
 
+## Features
+
+- Live dashboard for mirrored iPhone notifications.
+- Optional Android notification shade mirroring.
+- Per-app filtering and show/hide message body settings.
+- Auto-reconnect to the last paired iPhone, with only one pending reconnect attempt at a time.
+- iOS app display names fetched through ANCS and persisted locally.
+- Debug screen for ANCS events, with optional verbose BLE packet logging in Settings.
+- Basic Android Auto message actions for reply/mark-as-read UI compatibility. Replies cannot be sent back to iPhone through ANCS.
+
+---
+
+## Debugging
+
+The Debug screen shows connection and ANCS protocol events. By default it avoids raw BLE packet spam.
+
+For deeper packet diagnostics, enable:
+
+```
+Settings → Debug → Verbose BLE logging
+```
+
+Verbose logging adds raw Data Source packet hex, Control Point command bytes, and parsed attribute details to the Debug screen.
+
+---
+
 ## Known Limitations
 
 - **iOS notification preview privacy** — If the user has "Show Previews: Never" in iPhone Settings → Notifications, iOS will not send the message body in ANCS attributes. The title may also be redacted. This is an iOS privacy control; NotiMirror cannot bypass it.
@@ -117,9 +147,9 @@ MainViewModel               ← bridges Repository/Settings to UI
 
 - **ANCS service discovery timing** — On first connection iOS may take 5–10 seconds to expose the ANCS service. NotiMirror retries automatically.
 
-- **Call control not implemented** — Answering or rejecting calls via ANCS Perform Notification Action is out of scope for MVP.
+- **Call control depends on iOS action availability** — Answer/decline actions are shown only when iOS marks the notification as supporting those actions.
 
-- **Reply to messages not implemented** — Replying via ANCS is out of scope for MVP.
+- **Reply to messages is not supported by ANCS** — Android Auto reply UI can collect a response, but ANCS does not provide a way for NotiMirror to send that text back to the iPhone app.
 
 - **One iPhone at a time** — NotiMirror connects to a single iPhone. Multi-device support is not implemented.
 
@@ -127,7 +157,7 @@ MainViewModel               ← bridges Repository/Settings to UI
 
 ## Building
 
-Requires Android Studio Hedgehog (2023.1.1) or newer, AGP 8.5+, Kotlin 2.0+.
+Requires Android Studio Hedgehog (2023.1.1) or newer, AGP 8.5+, and Kotlin 1.9.x.
 
 ```bash
 ./gradlew assembleDebug
@@ -138,8 +168,14 @@ Install to a connected device:
 ./gradlew installDebug
 ```
 
+Run JVM parser/command tests:
+```bash
+./gradlew testDebugUnitTest
+```
+
 Minimum SDK: **31** (Android 12)  
 Target SDK: **35** (Android 15)
+Version name/code are maintained in `app/build.gradle.kts` and displayed in Settings → About.
 
 ---
 

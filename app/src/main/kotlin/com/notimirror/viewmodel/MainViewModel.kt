@@ -51,6 +51,9 @@ class MainViewModel(
     val showAndroidNotifications: StateFlow<Boolean> = settings.showAndroidNotifications
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
+    val verboseDebugLogging: StateFlow<Boolean> = settings.verboseDebugLogging
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
+
     val lastDeviceAddress: StateFlow<String?> = settings.lastDeviceAddress
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
 
@@ -87,6 +90,7 @@ class MainViewModel(
     fun setKeepScreenAwake(v: Boolean) = viewModelScope.launch { settings.setKeepScreenAwake(v) }
     fun setAutoReconnect(v: Boolean) = viewModelScope.launch { settings.setAutoReconnect(v) }
     fun setShowAndroidNotifications(v: Boolean) = viewModelScope.launch { settings.setShowAndroidNotifications(v) }
+    fun setVerboseDebugLogging(v: Boolean) = viewModelScope.launch { settings.setVerboseDebugLogging(v) }
     fun toggleFilteredApp(bundleId: String) = viewModelScope.launch { settings.toggleFilteredApp(bundleId) }
     fun setLastDeviceAddress(address: String) = viewModelScope.launch { settings.setLastDeviceAddress(address) }
 

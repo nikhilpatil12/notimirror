@@ -6,6 +6,7 @@ import com.notimirror.data.IPhoneNotification
 import com.notimirror.data.NotificationRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.launchIn
@@ -14,6 +15,8 @@ import kotlinx.coroutines.launch
 import java.time.Instant
 
 private const val TAG = "AncsClient"
+private const val CONTROL_POINT_RESPONSE_TIMEOUT_MS = 4_000L
+private const val CONTROL_POINT_REQUEST_SPACING_MS = 150L
 
 /**
  * Orchestrates the ANCS protocol on top of BleConnectionManager.
@@ -35,6 +38,10 @@ class AncsClient(
     // Cache of app bundle ID -> display name fetched from iOS
     private val appNameCache = mutableMapOf<String, String>()
     private val appNameRequests = mutableSetOf<String>() // Track pending requests
+    private val controlPointQueue = ArrayDeque<PendingAncsRequest>()
+    private var inFlightRequest: PendingAncsRequest? = null
+    private var responseTimeoutJob: Job? = null
+    private var drainPaused = false
 
     init {
         observeConnectionState()
@@ -43,9 +50,17 @@ class AncsClient(
 
     private fun observeConnectionState() {
         connectionManager.connectionState.onEach { state ->
-            if (state is ConnectionState.ServiceDiscovered && state.hasAncs) {
-                Log.d(TAG, "ANCS service found — subscribing to characteristics")
-                subscribeToAncsCharacteristics()
+            when (state) {
+                is ConnectionState.ServiceDiscovered -> {
+                    resetProtocolState()
+                    if (state.hasAncs) {
+                        Log.d(TAG, "ANCS service found — subscribing to characteristics")
+                        subscribeToAncsCharacteristics()
+                    }
+                }
+                ConnectionState.Disconnected,
+                is ConnectionState.Error -> resetProtocolState()
+                else -> Unit
             }
         }.launchIn(scope)
     }
@@ -58,6 +73,7 @@ class AncsClient(
                     if (event.status != 0) {
                         Log.w(TAG, "Control Point write failed status=${event.status}")
                         repository.logDebugEvent("CP write error status=${event.status}")
+                        completeInFlightRequest(success = false)
                     }
                 }
             }
@@ -117,8 +133,12 @@ class AncsClient(
                     )
                 )
                 val cmd = buildGetNotificationAttributesCommand(event.notificationUid)
-                repository.logDebugEvent("→ GetNotifAttrs uid=${event.notificationUid} cmd=${cmd.toHex()}")
-                connectionManager.writeControlPoint(cmd)
+                enqueueControlPointRequest(
+                    PendingAncsRequest.NotificationAttributes(
+                        uid = event.notificationUid,
+                        command = cmd
+                    )
+                )
             }
             AncsEventId.NotificationRemoved -> {
                 // Cancel Android system notification (stops vibration) but keep in repository list
@@ -137,43 +157,58 @@ class AncsClient(
      */
     @Synchronized
     private fun handleDataSource(data: ByteArray) {
-        val debugLine = "DS ${data.size}B: ${data.toHex()}"
-        Log.d(TAG, debugLine)
-        repository.logDebugEvent(debugLine)
+        if (repository.isVerboseDebugLoggingEnabled()) {
+            val debugLine = "DS ${data.size}B: ${data.toHex()}"
+            Log.d(TAG, debugLine)
+            repository.logVerboseDebugEvent(debugLine)
+        }
 
         val parsed = dataSourceParser.append(data) ?: return
+        if (!matchesInFlightRequest(parsed)) {
+            Log.w(TAG, "Ignoring stale ANCS Data Source response: $parsed")
+            repository.logDebugEvent("Ignoring stale ANCS response")
+            return
+        }
 
         when (parsed) {
-            is ParsedNotificationAttributes -> handleNotificationAttributesResponse(parsed)
-            is ParsedAppAttributes -> handleAppAttributesResponse(parsed)
+            is ParsedNotificationAttributes -> {
+                handleNotificationAttributesResponse(parsed)
+                completeInFlightRequest(success = true)
+            }
+            is ParsedAppAttributes -> {
+                handleAppAttributesResponse(parsed)
+                completeInFlightRequest(success = true)
+            }
         }
     }
 
     private fun handleNotificationAttributesResponse(parsed: ParsedNotificationAttributes) {
-        // Log raw attributes received with their IDs and lengths
-        val attrDetails = if (parsed.rawAttrs.isEmpty()) {
-            "NO ATTRIBUTES RECEIVED"
-        } else {
-            parsed.rawAttrs.entries.joinToString(", ") { (id, value) ->
-                val attrName = when (id) {
-                    NotificationAttributeId.APP_IDENTIFIER -> "AppID"
-                    NotificationAttributeId.TITLE -> "Title"
-                    NotificationAttributeId.SUBTITLE -> "Subtitle"
-                    NotificationAttributeId.MESSAGE -> "Message"
-                    NotificationAttributeId.DATE -> "Date"
-                    else -> "Attr$id"
-                }
-                if (value.isEmpty()) {
-                    "$attrName(EMPTY)"
-                } else {
-                    "$attrName(${value.length}): '${value.take(50)}${if (value.length > 50) "..." else ""}'"
+        if (repository.isVerboseDebugLoggingEnabled()) {
+            // Log raw attributes received with their IDs and lengths
+            val attrDetails = if (parsed.rawAttrs.isEmpty()) {
+                "NO ATTRIBUTES RECEIVED"
+            } else {
+                parsed.rawAttrs.entries.joinToString(", ") { (id, value) ->
+                    val attrName = when (id) {
+                        NotificationAttributeId.APP_IDENTIFIER -> "AppID"
+                        NotificationAttributeId.TITLE -> "Title"
+                        NotificationAttributeId.SUBTITLE -> "Subtitle"
+                        NotificationAttributeId.MESSAGE -> "Message"
+                        NotificationAttributeId.DATE -> "Date"
+                        else -> "Attr$id"
+                    }
+                    if (value.isEmpty()) {
+                        "$attrName(EMPTY)"
+                    } else {
+                        "$attrName(${value.length}): '${value.take(50)}${if (value.length > 50) "..." else ""}'"
+                    }
                 }
             }
-        }
 
-        val resultLine = "DS parsed uid=${parsed.uid} attrs: $attrDetails"
-        Log.d(TAG, resultLine)
-        repository.logDebugEvent(resultLine)
+            val resultLine = "DS parsed uid=${parsed.uid} attrs: $attrDetails"
+            Log.d(TAG, resultLine)
+            repository.logVerboseDebugEvent(resultLine)
+        }
 
         // Additional debug if app identifier is missing
         if (parsed.appIdentifier.isEmpty()) {
@@ -183,6 +218,7 @@ class AncsClient(
 
         // Request app display name if we haven't seen this app before
         if (parsed.appIdentifier.isNotBlank() &&
+            repository.getAppDisplayName(parsed.appIdentifier) == parsed.appIdentifier &&
             parsed.appIdentifier !in appNameCache &&
             parsed.appIdentifier !in appNameRequests) {
             requestAppDisplayName(parsed.appIdentifier)
@@ -212,11 +248,15 @@ class AncsClient(
 
     private fun requestAppDisplayName(appIdentifier: String) {
         Log.d(TAG, "Requesting display name for: $appIdentifier")
-        repository.logDebugEvent("→ GetAppAttrs for $appIdentifier")
 
         appNameRequests.add(appIdentifier)
         val cmd = buildGetAppAttributesCommand(appIdentifier)
-        connectionManager.writeControlPoint(cmd)
+        enqueueControlPointRequest(
+            PendingAncsRequest.AppAttributes(
+                appIdentifier = appIdentifier,
+                command = cmd
+            )
+        )
     }
 
     /**
@@ -226,7 +266,116 @@ class AncsClient(
     fun getAppDisplayName(appIdentifier: String): String {
         return appNameCache[appIdentifier] ?: appIdentifier
     }
+
+    @Synchronized
+    private fun enqueueControlPointRequest(request: PendingAncsRequest) {
+        controlPointQueue.addLast(request)
+        drainControlPointQueue()
+    }
+
+    @Synchronized
+    private fun drainControlPointQueue() {
+        if (drainPaused || inFlightRequest != null || controlPointQueue.isEmpty()) return
+
+        val request = controlPointQueue.removeFirst()
+        inFlightRequest = request
+        dataSourceParser.reset()
+
+        when (request) {
+            is PendingAncsRequest.NotificationAttributes ->
+                repository.logVerboseDebugEvent("→ GetNotifAttrs uid=${request.uid} cmd=${request.command.toHex()}")
+            is PendingAncsRequest.AppAttributes ->
+                repository.logVerboseDebugEvent("→ GetAppAttrs for ${request.appIdentifier} cmd=${request.command.toHex()}")
+        }
+
+        connectionManager.writeControlPoint(request.command)
+        startResponseTimeout(request)
+    }
+
+    @Synchronized
+    private fun completeInFlightRequest(success: Boolean) {
+        val completed = inFlightRequest ?: return
+        responseTimeoutJob?.cancel()
+        responseTimeoutJob = null
+        inFlightRequest = null
+        drainPaused = true
+
+        if (!success && completed is PendingAncsRequest.AppAttributes) {
+            appNameRequests.remove(completed.appIdentifier)
+        }
+
+        scope.launch {
+            delay(CONTROL_POINT_REQUEST_SPACING_MS)
+            resumeControlPointQueue()
+        }
+    }
+
+    @Synchronized
+    private fun resetProtocolState() {
+        responseTimeoutJob?.cancel()
+        responseTimeoutJob = null
+        inFlightRequest = null
+        drainPaused = false
+        controlPointQueue.clear()
+        appNameRequests.clear()
+        dataSourceParser.reset()
+    }
+
+    @Synchronized
+    private fun startResponseTimeout(request: PendingAncsRequest) {
+        responseTimeoutJob?.cancel()
+        responseTimeoutJob = scope.launch {
+            delay(CONTROL_POINT_RESPONSE_TIMEOUT_MS)
+            handleResponseTimeout(request)
+        }
+    }
+
+    @Synchronized
+    private fun handleResponseTimeout(request: PendingAncsRequest) {
+        if (inFlightRequest !== request) return
+
+        val label = when (request) {
+            is PendingAncsRequest.NotificationAttributes -> "notification uid=${request.uid}"
+            is PendingAncsRequest.AppAttributes -> "app ${request.appIdentifier}"
+        }
+        Log.w(TAG, "Timed out waiting for ANCS Data Source response for $label")
+        repository.logDebugEvent("ANCS response timeout for $label")
+        dataSourceParser.reset()
+        completeInFlightRequest(success = false)
+    }
+
+    @Synchronized
+    private fun matchesInFlightRequest(response: DataSourceResponse): Boolean {
+        val request = inFlightRequest ?: return false
+        return when {
+            request is PendingAncsRequest.NotificationAttributes && response is ParsedNotificationAttributes ->
+                request.uid == response.uid
+            request is PendingAncsRequest.AppAttributes && response is ParsedAppAttributes ->
+                request.appIdentifier == response.appIdentifier
+            else -> false
+        }
+    }
+
+    @Synchronized
+    private fun resumeControlPointQueue() {
+        drainPaused = false
+        drainControlPointQueue()
+    }
 }
 
 fun ByteArray.toHex(): String = joinToString("") { "%02X".format(it) }
 fun Byte.toHex(): String = "%02X".format(this)
+
+private sealed class PendingAncsRequest {
+    abstract val command: ByteArray
+
+    data class NotificationAttributes(
+        val uid: Int,
+        override val command: ByteArray
+    ) : PendingAncsRequest()
+
+    data class AppAttributes(
+        val appIdentifier: String,
+        override val command: ByteArray
+    ) : PendingAncsRequest()
+}

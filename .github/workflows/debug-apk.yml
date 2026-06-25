@@ -38,17 +38,34 @@ jobs:
         env:
           ANDROID_HOME: ${{ env.ANDROID_SDK_ROOT }}
 
+      - name: Read app version
+        if: github.event_name != 'pull_request'
+        id: app_version
+        shell: bash
+        run: |
+          version_name=$(sed -n 's/.*versionName = "\(.*\)".*/\1/p' app/build.gradle.kts | head -n 1)
+          version_code=$(sed -n 's/.*versionCode = \([0-9]\+\).*/\1/p' app/build.gradle.kts | head -n 1)
+          if [[ -z "$version_name" || -z "$version_code" ]]; then
+            echo "Failed to read app version from app/build.gradle.kts" >&2
+            exit 1
+          fi
+          echo "name=$version_name" >> "$GITHUB_OUTPUT"
+          echo "code=$version_code" >> "$GITHUB_OUTPUT"
+          echo "tag=v$version_name" >> "$GITHUB_OUTPUT"
+
       - name: Create GitHub Release
         if: github.event_name != 'pull_request'
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: build-${{ github.run_number }}
-          name: "Build #${{ github.run_number }}"
+          tag_name: ${{ steps.app_version.outputs.tag }}
+          name: "NotiMirror v${{ steps.app_version.outputs.name }}"
           body: |
-            Automated build
+            Automated debug APK build for NotiMirror v${{ steps.app_version.outputs.name }} (${{ steps.app_version.outputs.code }}).
 
             **Commit:** ${{ github.sha }}
             **Branch:** ${{ github.ref_name }}
+            **Run:** #${{ github.run_number }}
           files: app/build/outputs/apk/debug/app-debug.apk
           prerelease: true
           fail_on_unmatched_files: true
+          make_latest: true

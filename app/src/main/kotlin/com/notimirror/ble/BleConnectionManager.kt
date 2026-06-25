@@ -103,6 +103,15 @@ class BleConnectionManager(private val context: Context) {
 
             // Deduplicate synchronously - Android delivers same packet to multiple threads
             synchronized(recentPackets) {
+                // Periodically clean up before recording this packet. If cleanup happens
+                // after recording, the first packet in a cleanup window deletes its own
+                // fingerprint and an immediate duplicate can slip through.
+                val now = System.currentTimeMillis()
+                if (now - lastCleanupTime > 500) {
+                    recentPackets.clear()
+                    lastCleanupTime = now
+                }
+
                 val packetHash = dataCopy.joinToString("") { "%02X".format(it) }
                 val uuid = characteristic.uuid
 
@@ -114,13 +123,6 @@ class BleConnectionManager(private val context: Context) {
 
                 // Track this packet
                 recentPackets[uuid] = packetHash
-
-                // Periodically clean up (every 500ms)
-                val now = System.currentTimeMillis()
-                if (now - lastCleanupTime > 500) {
-                    recentPackets.clear()
-                    lastCleanupTime = now
-                }
             }
 
             Log.d(TAG, "Characteristic changed: ${characteristic.uuid}, ${dataCopy.size} bytes")
@@ -141,6 +143,12 @@ class BleConnectionManager(private val context: Context) {
 
             // Deduplicate synchronously
             synchronized(recentPackets) {
+                val now = System.currentTimeMillis()
+                if (now - lastCleanupTime > 500) {
+                    recentPackets.clear()
+                    lastCleanupTime = now
+                }
+
                 val packetHash = dataCopy.joinToString("") { "%02X".format(it) }
                 val uuid = characteristic.uuid
 
@@ -150,12 +158,6 @@ class BleConnectionManager(private val context: Context) {
                 }
 
                 recentPackets[uuid] = packetHash
-
-                val now = System.currentTimeMillis()
-                if (now - lastCleanupTime > 500) {
-                    recentPackets.clear()
-                    lastCleanupTime = now
-                }
             }
 
             scope.launch {
